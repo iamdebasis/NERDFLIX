@@ -356,7 +356,11 @@ body {
    */
   .picker-status-item,
   .meta-duplicates,
-  .scan-bar > span.is-waiting {
+  .scan-bar > span.is-waiting,
+  .hero-bg,
+  .hero-trailer,
+  .hero-outgoing,
+  .hero-body {
     animation: none !important;
   }
   /* The spinner is the only signal that a film is opening, so it keeps turning —
@@ -533,6 +537,15 @@ body {
   position: relative;
   height: 62vh;
   min-height: 36rem;
+  /*
+   * The floor the billboard sits on. It used to live on `.hero-trailer`, which made
+   * that layer opaque — so the film being dissolved FROM was painted over before it
+   * could show through. The floor belongs to the hero; the layers above it are free
+   * to be transparent.
+   */
+  background: #101010;
+  /* The incoming artwork drifts slightly larger than its box; keep it inside. */
+  overflow: hidden;
 }
 
 /*
@@ -566,7 +579,10 @@ body {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: #101010;
+  /* Transparent on purpose — see the note on .hero's background. */
+  background: transparent;
+  /* Arrives rather than appearing. The film underneath is fading out beneath it. */
+  animation: hero-dissolve-in 900ms cubic-bezier(0.4, 0, 0.2, 1) both;
   /*
    * A STACKING CONTEXT, and this line is load-bearing.
    *
@@ -596,6 +612,58 @@ body {
 /* Still there underneath — it comes back the moment the video stands down. */
 .hero-bg.is-behind {
   opacity: 0;
+}
+
+/*
+ * The film the billboard is leaving.
+ *
+ * Sits on the hero's floor with the arriving layer fading in on top of it, so a
+ * hand-over reads as one picture becoming another rather than a cut through black.
+ * Removed as soon as the dissolve is over — see HERO_DISSOLVE_MS.
+ */
+.hero-outgoing {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+  animation: hero-dissolve-out 900ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes hero-dissolve-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes hero-dissolve-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/*
+ * A slow drift on the still, so the artwork is alive during its hold rather than being
+ * a frozen frame waiting for the video. It settles exactly as the trailer takes over.
+ */
+.hero-bg {
+  animation: hero-drift 9s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes hero-drift {
+  from {
+    transform: scale(1.055);
+  }
+  to {
+    transform: scale(1);
+  }
 }
 
 /*
@@ -676,7 +744,9 @@ body {
   /* The billboard rotates, so this whole block is replaced rather than edited. It
      arrives rather than snapping — a hard swap of a logo and three lines of text
      reads as a glitch. Keyed on the title id, so it replays on every change. */
-  animation: hero-swap 620ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  /* Delayed past the dissolve, so the picture establishes itself and the words follow.
+     Arriving together reads as a single hard swap; staggered reads as a scene change. */
+  animation: hero-swap 620ms cubic-bezier(0.4, 0, 0.2, 1) 380ms both;
 }
 
 @keyframes hero-swap {

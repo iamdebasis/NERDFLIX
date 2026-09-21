@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
+  HERO_OUTRO_MS,
   HERO_SETTLE_MS,
   HERO_VISIBLE_RATIO,
   buildHeroQueue,
@@ -18,6 +19,7 @@ const ready = {
   documentHidden: false,
   online: true,
   canPause: true,
+  outro: false,
 };
 
 describe('the hero billboard plays only when all of it is true', () => {
@@ -214,5 +216,37 @@ describe('finishing is detected as the loop wrapping', () => {
 
   test('a tiny stutter backwards is not a wrap', () => {
     assert.equal(didTrailerLoop(1.4, 0.9, 145.3), false);
+  });
+});
+
+describe('the beat between films', () => {
+  /**
+   * Cutting from a moving frame straight into a different film reads as a glitch. The
+   * billboard lands back on the still it started from, holds, and only then hands over.
+   */
+  test('the outro keeps the frame but stops it', () => {
+    assert.deepEqual(heroTrailerVerdict({ ...ready, outro: true }), {
+      mount: true,
+      play: false,
+      reason: 'outro',
+    });
+  });
+
+  test('it outranks being on screen, because it is a deliberate pause', () => {
+    assert.equal(heroTrailerVerdict({ ...ready, outro: true, onScreen: false }).reason, 'outro');
+  });
+
+  /** A film starting still wins — the billboard must never talk over it. */
+  test('but a film playing still outranks it', () => {
+    assert.equal(heroTrailerVerdict({ ...ready, outro: true, suspended: true }).reason, 'film-playing');
+  });
+
+  test('and it never begins before the artwork has had its turn', () => {
+    assert.equal(heroTrailerVerdict({ ...ready, outro: true, settled: false }).reason, 'waiting');
+  });
+
+  test('the hold is a beat, not a stall', () => {
+    assert.ok(HERO_OUTRO_MS >= 1000 && HERO_OUTRO_MS <= 4000);
+    assert.ok(HERO_OUTRO_MS < HERO_SETTLE_MS, 'shorter than the opening hold');
   });
 });

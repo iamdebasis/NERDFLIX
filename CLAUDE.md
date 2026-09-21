@@ -402,6 +402,33 @@ all, and the generous `HERO_FALLBACK_DWELL_MS` when the player will not talk to 
 is paused, so time spent scrolled away is not charged to the film you are about to
 look at.
 
+**The hand-over is a sequence, not a cut.** Artwork holds for `HERO_SETTLE_MS` (5s),
+the trailer plays, and when it wraps the billboard returns to the SAME film's still for
+`HERO_OUTRO_MS` (2s) before crossing to the next. Cutting from a moving frame straight
+into a different film reads as a glitch — two unrelated images with nothing between
+them. Landing back on the still it started from closes the loop and gives the dissolve
+something calm to begin from. Measured live: 2.1s outro, 1.0s dissolve, 5.1s settle,
+1.7s reveal.
+
+`outro` is a phase in `heroTrailerVerdict`, not a timer bolted on: the frame STAYS and
+is paused, because tearing it down for the two seconds before it is discarded anyway
+would cost a reload, and a frame vanishing mid-fade is the flicker the phase exists to
+prevent.
+
+The dissolve needs the OUTGOING artwork to survive the swap (`.hero-outgoing` in
+Browse), because the hero layer remounts on the new title — fading it in alone would
+reveal the page background rather than the previous film. Two things this depends on:
+
+- **`.hero` owns the dark floor, `.hero-trailer` is transparent.** The background used
+  to sit on the trailer layer, which made it opaque, so the film being dissolved FROM
+  was painted over before it could show.
+- **The dissolve timer lives in a REF, never in the effect's cleanup.** That effect runs
+  after every render by design (the hero is derived during render, so the comparison has
+  to happen on every commit). Returning `clearTimeout` from it cancelled the timer on
+  the very next render — the one `setOutgoingArt` had just caused. Measured: the
+  outgoing layer still mounted seven seconds into a 900ms dissolve, and stale by the
+  time the next hand-over began.
+
 A detail dialog over the billboard counts as covered and pauses it, same as scrolling
 away — it should not play to a surface nobody can see.
 

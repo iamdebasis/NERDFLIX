@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BrowseData, TitleCard } from '../../shared/types';
 import { Wordmark } from './Wordmark';
 import { HeroTrailer } from './HeroTrailer';
-import { buildHeroQueue, nextHeroIndex } from './hero-trailer';
+import { HERO_DISSOLVE_MS, buildHeroQueue, nextHeroIndex } from './hero-trailer';
 import {
   TrailerHost,
   TrailerSoundButton,
@@ -594,6 +594,22 @@ export function Browse({
   const [data, setData] = useState<BrowseData | null>(null);
   /** Position in the billboard rotation — see where `heroQueue` is built. */
   const [heroIndex, setHeroIndex] = useState(0);
+  /**
+   * The artwork of the film the billboard is leaving, kept alive for the length of the
+   * cross-dissolve.
+   *
+   * Without it there is nothing to dissolve FROM: the hero layer remounts on the new
+   * title, so fading it in would reveal the page background rather than the previous
+   * film. One extra `<img>` for under a second is a cheap way to make a hand-over read
+   * as one picture becoming another.
+   */
+  const [outgoingArt, setOutgoingArt] = useState<string | null>(null);
+  /** What the billboard is showing right now, read during the swap effect below. */
+  const heroSnapshot = useRef<{ id: string; backdrop: string | null } | null>(null);
+  const lastHeroId = useRef<string | null>(null);
+  /** The backdrop currently on screen, so the next turn knows what it is leaving. */
+  const outgoingRef = useRef<string | null>(null);
+  const dissolveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [hover, setHover] = useState<{
     card: TitleCard;
     rect: DOMRect;
@@ -611,6 +627,39 @@ export function Browse({
     void load();
     return window.libraries.onChanged(() => void load());
   }, [load]);
+
+  /**
+   * Hold the outgoing artwork for the length of the dissolve, then drop it.
+   *
+   * Deliberately NOT keyed on the hero id in a dependency array: the snapshot is taken
+   * during render, so the comparison has to happen after every commit to catch the one
+   * where it changed.
+   */
+  useEffect(() => {
+    const now = heroSnapshot.current;
+    const was = lastHeroId.current;
+    if (now && was && now.id !== was && outgoingRef.current) {
+      /*
+       * The timer lives in a ref, NOT in this effect's cleanup.
+       *
+       * This effect runs after every render by design — the snapshot is taken during
+       * render, so the comparison has to happen on every commit to catch the one where
+       * it changed. Returning `clearTimeout` from it therefore cancelled the timer on
+       * the very next render, which `setOutgoingArt` had just caused. The outgoing
+       * layer was never removed: measured still mounted seven seconds into a 900ms
+       * dissolve, and it would have been stale when the next hand-over began.
+       */
+      clearTimeout(dissolveTimer.current);
+      setOutgoingArt(outgoingRef.current);
+      dissolveTimer.current = setTimeout(() => setOutgoingArt(null), HERO_DISSOLVE_MS);
+    }
+    if (now) {
+      lastHeroId.current = now.id;
+      outgoingRef.current = now.backdrop;
+    }
+  });
+
+  useEffect(() => () => clearTimeout(dissolveTimer.current), []);
 
   const toggleList = async (card: TitleCard) => {
     const rowsBefore = data?.rows.map((r) => r.title).join('|');
@@ -670,6 +719,7 @@ export function Browse({
   const hero =
     (heroQueue.length ? byId.get(heroQueue[heroIndex % heroQueue.length]) : null) ??
     (data.heroId ? byId.get(data.heroId) : null);
+  heroSnapshot.current = hero ? { id: hero.id, backdrop: hero.backdrop } : null;
 
   /**
    * Which rows to show.
@@ -759,6 +809,12 @@ export function Browse({
 
       {showHero && hero && (
         <div className="hero">
+          {/* The film being left behind, fading out UNDER the one arriving. First in
+              the DOM so it paints below without needing a z-index of its own. */}
+          {outgoingArt && (
+            <img className="hero-outgoing" src={outgoingArt} alt="" draggable={false} />
+          )}
+
           {/* The artwork lives inside this now, so the still and the video can
               crossfade as one thing. The gradient and the title block are later
               siblings, so they paint over both without any z-index work. */}

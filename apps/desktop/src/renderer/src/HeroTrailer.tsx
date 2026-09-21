@@ -5,6 +5,7 @@ import { youTubeEmbedUrl } from './youtube.js';
 import {
   HERO_FALLBACK_DWELL_MS,
   HERO_NO_TRAILER_DWELL_MS,
+  HERO_OUTRO_MS,
   HERO_SETTLE_MS,
   HERO_VISIBLE_RATIO,
   didTrailerLoop,
@@ -88,15 +89,28 @@ export function HeroTrailer({
   const playingSince = useRef<number | null>(null);
   /** Reported by the player, when it talks. Used to tell a loop from a seek. */
   const duration = useRef<number | undefined>(undefined);
-  /** One advance per title; a wrap plus a timer must not both fire. */
+  /** One hand-over per title; a wrap plus a dwell timer must not both fire. */
   const finished = useRef(false);
+  /** Holding on the artwork before handing over. */
+  const [outro, setOutro] = useState(false);
 
   const finishedRef = useRef(onFinished);
   finishedRef.current = onFinished;
+
+  /**
+   * Begin the hand-over: stop the video, let the artwork come back, hold, then advance.
+   *
+   * The advance is NOT immediate. Cutting from a moving frame straight into a different
+   * film reads as a glitch — two unrelated images with nothing between them. Landing
+   * back on the still it started from closes the loop and gives the cross-dissolve in
+   * Browse something calm to begin from.
+   */
   const finish = useCallback(() => {
     if (finished.current) return;
     finished.current = true;
-    finishedRef.current?.();
+    setOutro(true);
+    setVisible(false); // the still returns underneath
+    window.setTimeout(() => finishedRef.current?.(), HERO_OUTRO_MS);
   }, []);
 
   const post = useCallback((msg: unknown) => {
@@ -133,6 +147,7 @@ export function HeroTrailer({
     setSettled(false);
     setVisible(false);
     finished.current = false;
+    setOutro(false);
     position.current = 0;
     positionAt.current = 0;
     duration.current = undefined;
@@ -197,6 +212,7 @@ export function HeroTrailer({
     documentHidden: documentHidden || Boolean(covered),
     online,
     canPause: canTalk,
+    outro,
   });
 
   useEffect(() => {
@@ -304,7 +320,7 @@ export function HeroTrailer({
    * count against the film you are about to look at.
    */
   useEffect(() => {
-    if (!settled || suspended) return;
+    if (!settled || suspended || outro) return;
     if (!url) {
       const t = window.setTimeout(finish, HERO_NO_TRAILER_DWELL_MS);
       return () => window.clearTimeout(t);
@@ -312,7 +328,7 @@ export function HeroTrailer({
     if (canTalk || !verdict.play) return;
     const t = window.setTimeout(finish, HERO_FALLBACK_DWELL_MS);
     return () => window.clearTimeout(t);
-  }, [settled, suspended, url, canTalk, verdict.play, finish]);
+  }, [settled, suspended, outro, url, canTalk, verdict.play, finish]);
 
   const onLoad = useCallback(() => {
     // `load` fires cross-origin; it means the player document is up, not that video is

@@ -30,12 +30,18 @@ export type HeroConditions = {
    * the download is to remove the frame, and coming back costs a reload.
    */
   canPause: boolean;
+  /**
+   * The trailer has finished and the billboard is holding on its artwork before
+   * handing over. A beat of stillness, not a dead moment — see HERO_OUTRO_MS.
+   */
+  outro: boolean;
 };
 
 export type HeroReason =
   | 'playing'
   | 'no-trailer'
   | 'waiting'
+  | 'outro'
   | 'off-screen'
   | 'film-playing'
   | 'window-hidden'
@@ -64,6 +70,13 @@ export function heroTrailerVerdict(c: HeroConditions): HeroVerdict {
   if (c.suspended) return { mount: false, play: false, reason: 'film-playing' };
   if (!c.online) return { mount: false, play: false, reason: 'offline' };
   if (!c.settled) return { mount: false, play: false, reason: 'waiting' };
+  /*
+   * Holding on the artwork before the hand-over. The frame STAYS, paused: tearing it
+   * down here would cost a reload for the two seconds before it is discarded anyway,
+   * and a frame disappearing mid-fade is exactly the flicker this phase exists to
+   * avoid.
+   */
+  if (c.outro) return { mount: true, play: false, reason: 'outro' };
   if (c.documentHidden) return { mount: c.canPause, play: false, reason: 'window-hidden' };
   if (!c.onScreen) return { mount: c.canPause, play: false, reason: 'off-screen' };
   return { mount: true, play: true, reason: 'playing' };
@@ -98,6 +111,25 @@ export const HERO_VISIBLE_RATIO = 0.35;
  *    trailer off early is worse than holding it a little long, so this is generous —
  *    longer than most trailers run.
  */
+/**
+ * How long the billboard rests on its own artwork after the trailer finishes, before
+ * handing over to the next film.
+ *
+ * Without it the cut from a moving frame straight into a different film reads as a
+ * glitch — two unrelated images with nothing between them. Landing back on the still
+ * you started from closes the loop, and gives the cross-dissolve something calm to
+ * begin from. Long enough to register, short enough not to feel like a stall.
+ */
+export const HERO_OUTRO_MS = 2000;
+
+/**
+ * How long one billboard dissolves into the next.
+ *
+ * Slow enough to read as a deliberate scene change rather than a cut, short enough
+ * that the new film's artwork is settled before its own hold begins.
+ */
+export const HERO_DISSOLVE_MS = 900;
+
 export const HERO_NO_TRAILER_DWELL_MS = 20_000;
 export const HERO_FALLBACK_DWELL_MS = 150_000;
 
