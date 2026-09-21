@@ -21,6 +21,22 @@
 
   --card: 10.5rem;
   --gap: 2.25rem;
+
+  /*
+   * How far the rows slide UP under the hero, so the first row peeks from beneath the
+   * billboard's gradient the way Netflix's does.
+   */
+  --row-tuck: 5rem;
+  /*
+   * Clearance between the hero's buttons and the first row's title.
+   *
+   * These two were independent numbers that both happened to be 5rem — the hero body's
+   * inset from the bottom, and the rows' tuck — so the Play button's bottom edge and
+   * the row title's top edge landed on the SAME PIXEL. Measured at 0px of gap. Deriving
+   * the hero's inset from the tuck plus this value makes that collision impossible
+   * rather than a coincidence waiting to happen again.
+   */
+  --hero-clear: 3rem;
 }
 
 * {
@@ -504,10 +520,38 @@ body {
 
 /* --- hero ------------------------------------------------------------------ */
 
+/*
+ * Tall enough to hold what is laid over it.
+ *
+ * `min-height` was 25rem, which is smaller than the title block it has to contain: a
+ * clear-logo at 9rem plus tagline, blurb and buttons measures ~22rem on its own, and
+ * with the bottom inset that left it starting ABOVE the nav and sliding underneath it
+ * on any window shorter than about 850px. The floor is now derived from what is
+ * actually in there rather than picked.
+ */
 .hero {
   position: relative;
   height: 62vh;
-  min-height: 25rem;
+  min-height: 36rem;
+}
+
+/*
+ * A short window cannot have everything.
+ *
+ * Rather than let the block collide with the nav, drop what is least load-bearing: the
+ * blurb is one click away in the detail view, and the logo can be smaller and still be
+ * the thing you recognise. Netflix trims its billboard the same way.
+ */
+@media (max-height: 760px) {
+  .hero {
+    min-height: 26rem;
+  }
+  .hero-logo {
+    max-height: 6rem;
+  }
+  .hero-overview {
+    display: none;
+  }
 }
 
 /*
@@ -598,7 +642,8 @@ body {
 .hero-mute {
   position: absolute;
   right: 3.5rem;
-  bottom: 5rem;
+  /* Same baseline as the title block opposite it. */
+  bottom: calc(var(--row-tuck) + var(--hero-clear));
   z-index: 3;
   border-color: rgba(255, 255, 255, 0.55);
   background: rgba(20, 20, 20, 0.45);
@@ -625,7 +670,7 @@ body {
 .hero-body {
   position: absolute;
   left: 3.5rem;
-  bottom: 5rem;
+  bottom: calc(var(--row-tuck) + var(--hero-clear));
   max-width: 34rem;
   z-index: 2;
   /* The billboard rotates, so this whole block is replaced rather than edited. It
@@ -760,7 +805,7 @@ body {
 .rows {
   position: relative;
   z-index: 2;
-  margin-top: -5rem;
+  margin-top: calc(-1 * var(--row-tuck));
   padding-bottom: 4rem;
 }
 
