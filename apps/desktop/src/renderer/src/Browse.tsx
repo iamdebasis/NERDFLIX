@@ -263,9 +263,14 @@ function HoverCard({
         </div>
 
         <div className="hover-meta">
+          {/* Year first, because the detail view this expands into leads with it too —
+              so it does not jump position mid-transition. */}
+          {card.year ? <span>{card.year}</span> : null}
           {card.certification && <span className="cert">{card.certification}</span>}
-          <span>{fmtRuntime(card.runtimeMinutes)}</span>
-          <span className="tag">{card.resolution}</span>
+          {/* Guarded rather than always rendered: an unenriched title has no runtime
+              and an empty span still takes a gap, leaving a stray separator. */}
+          {card.runtimeMinutes ? <span>{fmtRuntime(card.runtimeMinutes)}</span> : null}
+          {card.resolution ? <span className="tag">{card.resolution}</span> : null}
           {card.hdr !== 'SDR' && <span className="tag hdr">{card.hdr}</span>}
         </div>
 
