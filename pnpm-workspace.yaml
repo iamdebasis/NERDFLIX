@@ -1,0 +1,10 @@
+packages:
+  - 'packages/*'
+  - 'apps/*'
+
+allowBuilds:
+  # tsx bundles esbuild, whose postinstall only fetches a platform binary that modern
+  # esbuild already ships as an optionalDependency — tsx runs fine without it.
+  esbuild: false
+  # Electron's postinstall downloads the actual runtime. Without this there is no app.
+  electron: true

@@ -1,0 +1,19 @@
+{
+  "name": "@nfl/cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "scan": "tsx src/scan.ts",
+    "probe": "tsx src/probe.ts",
+    "doctor": "tsx src/doctor.ts",
+    "play": "tsx src/play.ts",
+    "volumes": "tsx src/volumes.ts",
+    "library": "tsx src/library.ts",
+    "enrich": "tsx src/enrich.ts"
+  },
+  "dependencies": {
+    "@nfl/core": "workspace:*",
+    "@nfl/player": "workspace:*"
+  }
+}

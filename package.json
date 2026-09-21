@@ -1,0 +1,38 @@
+{
+  "name": "netflix-local",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "scan": "pnpm --filter @nfl/cli run scan",
+    "probe": "pnpm --filter @nfl/cli run probe",
+    "doctor": "pnpm --filter @nfl/cli run doctor",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json",
+    "test": "tsx --test \"packages/*/src/**/*.test.ts\" \"apps/desktop/src/main/*.test.ts\" \"apps/desktop/src/renderer/src/*.test.ts\"",
+    "play": "pnpm --filter @nfl/cli run play",
+    "volumes": "pnpm --filter @nfl/cli run volumes",
+    "library": "pnpm --filter @nfl/cli run library",
+    "app": "pnpm --filter @nfl/desktop run dev",
+    "app:build": "pnpm --filter @nfl/desktop run build",
+    "postinstall": "node scripts/ensure-electron.mjs",
+    "app:fix": "node node_modules/electron/install.js",
+    "enrich": "pnpm --filter @nfl/cli run enrich"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.3.0",
+    "electron-vite": "^5.0.0",
+    "motion": "^13.3.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^8.3.0"
+  }
+}

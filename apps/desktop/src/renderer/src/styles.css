@@ -1,0 +1,1903 @@
+/*
+ * Visual brief: match Netflix exactly (the client pinned this), and spend the one
+ * free axis — what a card *face* looks like — on something Netflix has no equivalent
+ * for. Netflix shows a person; we show a shelf.
+ *
+ * Palette is Netflix's own: #141414 page, #E50914 red used once and only for the
+ * primary action, #808080 for the secondary text under a card, white on hover.
+ *
+ * Type: Netflix Sans is proprietary. On macOS the system face is the closest
+ * available geometric grotesque and renders sharper than any webfont we could ship,
+ * so we use it rather than approximating with a download.
+ */
+
+:root {
+  --bg: #141414;
+  --red: #e50914;
+  --text: #ffffff;
+  --muted: #808080;
+  --muted-dim: #555555;
+  --hairline: rgba(255, 255, 255, 0.28);
+
+  --card: 10.5rem;
+  --gap: 2.25rem;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter Tight', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  /* Frameless window: this strip is what you drag the app by. */
+  cursor: default;
+  user-select: none;
+}
+
+.drag-strip {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 3rem;
+  -webkit-app-region: drag;
+}
+
+.screen {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 3rem 2rem;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.75rem;
+}
+
+/*
+ * Netflix sets this at a large, light weight with generous tracking. Matching the
+ * proportion matters more than the exact px: it should read as a question, not a
+ * page title.
+ */
+.headline {
+  font-size: clamp(1.9rem, 3.6vw, 3rem);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  text-align: center;
+  line-height: 1.1;
+}
+
+.subhead {
+  margin-top: 0.85rem;
+  font-size: 1rem;
+  color: var(--muted);
+  text-align: center;
+  max-width: 34rem;
+  line-height: 1.5;
+}
+
+/*
+ * The library picker's card row. Named distinctly from the browse surface's `.row`:
+ * sharing the name meant this centring rule silently applied to every browse row,
+ * which is why their titles and tracks sat at different offsets.
+ */
+.picker-row {
+  display: flex;
+  gap: var(--gap);
+  flex-wrap: wrap;
+  justify-content: center;
+  /*
+   * Stretch, so every column is as tall as the tallest one.
+   *
+   * The combined card carries an extra line ("N films on two drives, counted once")
+   * that the others do not, so with `flex-start` its Rescan button sat lower than the
+   * rest — and the whole row grew and shrank as that line came and went after a scan.
+   * Stretching plus `margin-top: auto` on the button pins every button to the same
+   * baseline and absorbs the difference in the gap instead of the layout.
+   */
+  align-items: stretch;
+}
+
+/* --- card ------------------------------------------------------------------ */
+
+.card {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  width: var(--card);
+}
+
+.face {
+  width: var(--card);
+  height: var(--card);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  outline: 3px solid transparent;
+  outline-offset: 3px;
+  transition:
+    outline-color 180ms ease,
+    transform 180ms ease;
+}
+
+.card:hover .face,
+.card:focus-visible .face {
+  outline-color: var(--text);
+}
+
+.card:focus-visible {
+  outline: none;
+}
+
+.card:hover .name,
+.card:focus-visible .name {
+  color: var(--text);
+}
+
+.name {
+  color: var(--muted);
+  font-size: 1.05rem;
+  font-weight: 500;
+  transition: color 180ms ease;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  color: #6f6f6f;
+  font-size: 0.8rem;
+  text-align: center;
+  line-height: 1.45;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Paths get shortened in JS (shortPath) rather than with `direction: rtl`.
+ * RTL reorders the whole string, not just the truncation: "128 films · 7.4 TB"
+ * rendered as "films · 7.4 TB 128".
+ */
+.meta-path {
+  color: #565656;
+  font-size: 0.75rem;
+}
+
+/*
+ * A disconnected drive is desaturated rather than hidden. The library still knows
+ * what is on it, so the card keeps its count and its identity — only its
+ * availability changed. See ARCHITECTURE.md §8.5.
+ */
+.card.offline .face {
+  filter: grayscale(1) brightness(0.45);
+}
+
+.card.offline .name {
+  color: var(--muted-dim);
+}
+
+.badge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.01em;
+  background: rgba(0, 0, 0, 0.72);
+  color: #d2d2d2;
+  text-align: center;
+  backdrop-filter: blur(2px);
+}
+
+.card.offline .badge {
+  /* Counteract the parent desaturation so the status stays legible. */
+  filter: grayscale(0) brightness(2.2);
+}
+
+/* --- add card --------------------------------------------------------------- */
+
+.add-face {
+  width: var(--card);
+  height: var(--card);
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 2px dashed rgba(255, 255, 255, 0.22);
+  transition:
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.card:hover .add-face,
+.card:focus-visible .add-face {
+  border-color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.plus {
+  width: 2.6rem;
+  height: 2.6rem;
+  color: var(--muted);
+  transition: color 180ms ease;
+}
+
+.card:hover .plus {
+  color: var(--text);
+}
+
+/* --- actions ---------------------------------------------------------------- */
+
+.actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.ghost-button {
+  background: none;
+  border: 1px solid var(--hairline);
+  color: var(--muted);
+  padding: 0.65rem 1.6rem;
+  font: inherit;
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition:
+    color 180ms ease,
+    border-color 180ms ease;
+}
+
+.ghost-button:hover,
+.ghost-button:focus-visible {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+/* The single use of Netflix red in the whole screen: the one thing to do when empty. */
+.primary-button {
+  background: var(--red);
+  border: 0;
+  color: var(--text);
+  padding: 0.8rem 2rem;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: filter 160ms ease;
+}
+
+.primary-button:hover,
+.primary-button:focus-visible {
+  filter: brightness(1.12);
+}
+
+.remove-button {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.remove-button:hover {
+  background: var(--red);
+}
+
+.hint {
+  color: var(--muted-dim);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.loading {
+  color: var(--muted-dim);
+  font-size: 0.95rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+  /*
+   * Animations too. The status region and the progress sweep are decoration on top of
+   * information that is already in the text, so removing them costs nothing.
+   */
+  .picker-status-item,
+  .meta-duplicates,
+  .scan-bar > span.is-waiting {
+    animation: none !important;
+  }
+  /* The spinner is the only signal that a film is opening, so it keeps turning —
+     but slowly enough not to be the thing the setting is there to prevent. */
+  .icon-spin {
+    animation-duration: 2.4s !important;
+  }
+}
+
+/* ===== Browse ============================================================== */
+
+.browse {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg);
+}
+
+/* Netflix's nav is transparent over the billboard and fills in as you scroll. */
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 1rem 3rem 1rem 6rem; /* room for the traffic lights */
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent);
+  transition: background 300ms ease;
+  -webkit-app-region: drag;
+}
+
+.nav.solid {
+  background: var(--bg);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/*
+ * Everything interactive in the nav must opt OUT of the window drag region.
+ *
+ * The exception used to list only `button` and `span`, so the search <input> stayed
+ * draggable: clicking it moved the window instead of focusing the field, and typing
+ * went nowhere. Any new control added here needs to be covered — hence the broad
+ * selector rather than another enumerated element.
+ */
+.nav button,
+.nav input,
+.nav .nav-links span,
+.nav-search {
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * The brand slot now names the library you are in and takes you back out.
+ *
+ * It was "▸ LOCAL" — a logo that happened to be the only exit, so nobody would think
+ * to click it, and which told you nothing about whether you were browsing one drive or
+ * all of them.
+ */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: none;
+  border: 0;
+  color: #e5e5e5;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.3rem 0.5rem 0.3rem 0.2rem;
+  border-radius: 4px;
+  transition: color 140ms ease, background 140ms ease;
+}
+.brand:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+
+/*
+ * The nav is a window drag region so the frameless window can be moved by its top
+ * bar. That makes EVERY child a drag target unless excepted — clicking the search
+ * field or a tab dragged the window instead of doing anything, which reads as the
+ * controls being dead.
+ *
+ * Declared once for all interactive elements rather than per control, so anything
+ * added to the nav later works without anyone remembering this rule.
+ */
+.nav button,
+.nav input,
+.nav a,
+.nav [role='button'] {
+  -webkit-app-region: no-drag;
+}
+
+.brand-chevron { color: var(--red); font-size: 1.2rem; line-height: 1; }
+.brand-label { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.nav-links {
+  display: flex;
+  gap: 0.35rem;
+  margin-left: 0.6rem;
+}
+
+.nav-links button {
+  background: none;
+  border: 0;
+  color: #b3b3b3;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+.nav-links button:hover { color: #fff; }
+/* A visible current view — the old spans gave no indication of state at all. */
+.nav-links button.active { color: #fff; background: rgba(255, 255, 255, 0.12); }
+
+.nav-search {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.nav-search:focus-within { border-color: rgba(255, 255, 255, 0.45); background: rgba(0, 0, 0, 0.7); }
+.nav-search svg { width: 1rem; height: 1rem; color: #9a9a9a; flex: none; }
+
+.nav-search input {
+  background: none;
+  border: 0;
+  color: #e5e5e5;
+  font: inherit;
+  font-size: 0.85rem;
+  width: 13rem;
+}
+.nav-search input:focus { outline: none; }
+.nav-search input::placeholder { color: #767676; }
+
+.nav-search-clear {
+  background: none;
+  border: 0;
+  color: #9a9a9a;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.nav-search-clear:hover { color: #fff; }
+
+.browse-empty {
+  padding: 3rem 4rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.browse-empty strong { color: #e5e5e5; }
+
+/* --- hero ------------------------------------------------------------------ */
+
+.hero {
+  position: relative;
+  height: 62vh;
+  min-height: 25rem;
+}
+
+/*
+ * The billboard layer: artwork and video occupying the same box, crossfading.
+ *
+ * Edge to edge by construction — it fills the hero, and the hero is full-bleed. The
+ * player is a CHILD here rather than a fixed element at the document root, which is
+ * what makes this simple: the gradient and the title block are later siblings, so they
+ * paint over it without any of the stacking work the detail modal needed.
+ */
+.hero-trailer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #101010;
+  /*
+   * A STACKING CONTEXT, and this line is load-bearing.
+   *
+   * Without it the layer is `z-index: auto`, so the shield inside it (z-index 3, and
+   * it must be, to sit over the frame) competed directly with `.hero-body` at 2 — and
+   * won. The hero's Play and More Info buttons were covered by a transparent sheet and
+   * simply stopped working. Nothing looked wrong; they just did not respond.
+   *
+   * At `z-index: 0` everything inside is sealed below the gradient and the title
+   * block, whatever the children number themselves.
+   */
+  z-index: 0;
+}
+
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+  /* Slow, because this is the transition from a poster to a moving picture and a
+     quick cut makes it read as a glitch rather than as the page coming to life. */
+  transition: opacity 900ms ease;
+}
+
+/* Still there underneath — it comes back the moment the video stands down. */
+.hero-bg.is-behind {
+  opacity: 0;
+}
+
+/*
+ * The hero is much wider than it is tall, so the 16:9 frame that covers it is far
+ * wider than the box. Centring horizontally and letting `coverFrame` overshoot is what
+ * keeps it full-bleed instead of letterboxed.
+ */
+.hero-trailer .trailer-video {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 0;
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+.hero-trailer .trailer-video.is-playing {
+  opacity: 1;
+}
+
+/*
+ * Only the top edge here. The hero's own `.hero-fade` already carries the blend into
+ * the page and the wash behind the title, so a second bottom gradient would double it.
+ *
+ * Scoped by the parent rather than by a modifier class, so it wins on specificity no
+ * matter where it sits relative to `.trailer-veil` in this file. A single-class
+ * override loses to a later single-class rule, which is how the first attempt at this
+ * silently did nothing.
+ */
+.hero-trailer .trailer-veil {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.18) 7%, transparent 16%);
+}
+
+/*
+ * Bottom-right, clear of the title block on the left — where a billboard's sound
+ * control belongs, and where Netflix puts it.
+ */
+/*
+ * A sibling of the title block, NOT a child of the video layer.
+ *
+ * Inside the layer it would be sealed under `.hero-fade`, and the fade is at its
+ * strongest exactly where this button sits — it came out muddy and half-swallowed.
+ */
+.hero-mute {
+  position: absolute;
+  right: 3.5rem;
+  bottom: 5rem;
+  z-index: 3;
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(20, 20, 20, 0.45);
+  backdrop-filter: blur(6px);
+  animation: settle-in 400ms ease-out both;
+}
+
+/*
+ * Two gradients, not one: a horizontal wash so text has contrast on the left, and a
+ * vertical fade so the billboard dissolves into the first row rather than ending in
+ * a hard edge.
+ */
+.hero-fade {
+  position: absolute;
+  inset: 0;
+  /* Above the billboard layer, below the title block. */
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(20, 20, 20, 0.92) 0%, rgba(20, 20, 20, 0.5) 45%, transparent 75%),
+    linear-gradient(0deg, var(--bg) 0%, transparent 45%);
+}
+
+.hero-body {
+  position: absolute;
+  left: 3.5rem;
+  bottom: 5rem;
+  max-width: 34rem;
+  z-index: 2;
+  /* The billboard rotates, so this whole block is replaced rather than edited. It
+     arrives rather than snapping — a hard swap of a logo and three lines of text
+     reads as a glitch. Keyed on the title id, so it replays on every change. */
+  animation: hero-swap 620ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes hero-swap {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hero-logo {
+  max-width: 22rem;
+  max-height: 9rem;
+  object-fit: contain;
+  margin-bottom: 1rem;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.6));
+}
+
+.hero-title {
+  font-size: 3rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+
+.hero-tagline {
+  font-style: italic;
+  color: #d0d0d0;
+  margin-bottom: 0.5rem;
+}
+
+.hero-overview {
+  color: #d6d6d6;
+  line-height: 1.5;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  margin-bottom: 1.25rem;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.play-button {
+  height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: #fff;
+  color: #000;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 1.7rem 0 1.4rem;
+  font: inherit;
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.play-button svg {
+  width: 1.4rem;
+  height: 1.4rem;
+  display: block;
+}
+
+.play-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.play-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* The play triangle turns into this while a film is being opened. */
+.icon-spin {
+  animation: icon-spin 900ms linear infinite;
+}
+
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.play-button:disabled {
+  background: rgba(255, 255, 255, 0.35);
+  color: #333;
+  cursor: not-allowed;
+}
+
+.info-button {
+  height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: rgba(109, 109, 110, 0.7);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 1.5rem;
+  font: inherit;
+  font-size: 1.02rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.info-button svg {
+  width: 1.3rem;
+  height: 1.3rem;
+  display: block;
+}
+
+.info-button:hover {
+  background: rgba(109, 109, 110, 0.5);
+}
+
+/* --- rows ------------------------------------------------------------------ */
+
+.rows {
+  position: relative;
+  z-index: 2;
+  margin-top: -5rem;
+  padding-bottom: 4rem;
+}
+
+.row {
+  margin-bottom: 2.25rem;
+}
+
+.row-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #e5e5e5;
+  padding: 0 3.5rem 0.65rem;
+}
+
+.row-viewport {
+  position: relative;
+}
+
+.row-scroller {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  padding: 0 3.5rem 1rem;
+  scrollbar-width: none;
+}
+
+.row-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.tile {
+  flex: 0 0 auto;
+  width: 11rem;
+  aspect-ratio: 2 / 3;
+  border: 0;
+  padding: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #1c1c1c;
+  cursor: pointer;
+  position: relative;
+  scroll-snap-align: start;
+  transition: transform 200ms ease;
+}
+
+.tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tile:hover {
+  transform: scale(1.04);
+}
+
+.tile.offline img {
+  filter: grayscale(0.8) brightness(0.55);
+}
+
+.art-fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0.75rem;
+  color: #8a8a8a;
+  font-size: 0.85rem;
+  text-align: center;
+  background: linear-gradient(160deg, #262626, #141414);
+}
+
+.tile-progress {
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.3);
+  display: block;
+}
+
+.tile-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--red);
+}
+
+.pager {
+  position: absolute;
+  top: 0;
+  bottom: 1rem;
+  width: 3.5rem;
+  border: 0;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 1.8rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 180ms ease;
+  z-index: 3;
+}
+
+.row-viewport:hover .pager {
+  opacity: 1;
+}
+
+.pager.left {
+  left: 0;
+}
+
+.pager.right {
+  right: 0;
+}
+
+/* --- hover card ------------------------------------------------------------ */
+
+/*
+ * Fixed rather than in-flow: rows clip overflow for the carousel, so an in-flow card
+ * would be sliced at the row boundary.
+ */
+.hover-card {
+  position: fixed;
+  z-index: 60;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #181818;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.75);
+  animation: pop 180ms ease-out;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.hover-art {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  cursor: pointer;
+  background: #101010;
+}
+
+.hover-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.hover-logo {
+  position: absolute;
+  left: 1rem;
+  bottom: 0.9rem;
+  max-width: 45%;
+  max-height: 2.6rem;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.8));
+}
+
+.offline-strip {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  background: rgba(0, 0, 0, 0.78);
+  color: #ddd;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+}
+
+.hover-body {
+  padding: 0.9rem 1rem 1.1rem;
+}
+
+.hover-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/*
+ * One sizing system for every control.
+ *
+ * The icon size used to be declared per button — which is how the modal's mute button
+ * ended up with an unconstrained SVG spilling out of its circle: it is a `.circle big`,
+ * but the rule that sized the icon was scoped to `.trailer-sound`. Sizing from the
+ * control instead means a new button cannot be born broken.
+ */
+.circle {
+  width: 2.1rem;
+  height: 2.1rem;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  background: rgba(42, 42, 42, 0.6);
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.circle svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  display: block;
+}
+
+.circle:hover {
+  border-color: #fff;
+  background: rgba(60, 60, 60, 0.85);
+}
+
+.circle:active {
+  transform: scale(0.94);
+}
+
+.circle:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.circle.primary {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+}
+
+.circle.primary:disabled {
+  background: rgba(255, 255, 255, 0.4);
+  cursor: not-allowed;
+}
+
+/* Matches the Play button's height exactly, so the action row sits on one line. */
+.circle.big {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.circle.big svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+
+.hover-meta {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  font-size: 0.82rem;
+  color: #bcbcbc;
+  margin-bottom: 0.4rem;
+}
+
+.cert {
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  padding: 0 0.35rem;
+  font-size: 0.72rem;
+}
+
+.tag {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  font-size: 0.68rem;
+  color: #cfcfcf;
+}
+
+.tag.hdr {
+  color: #e8d48a;
+  border-color: rgba(232, 212, 138, 0.5);
+}
+
+.hover-genres {
+  font-size: 0.8rem;
+  color: #9a9a9a;
+}
+
+/* --- modal ------------------------------------------------------------------
+ *
+ * The dialog is built to sit OVER the trailer rather than beside it, which is the
+ * whole difference between this reading as a detail page and reading as a video with
+ * a caption under it.
+ *
+ * That needed the stacking order inverting. The player is one fixed element at the
+ * document root — it has to be, so hover → modal moves it instead of reloading it —
+ * and a fixed sibling cannot be above the modal's backdrop and below its title at
+ * once. So the player is put BENEATH the dialog (z-index 75), the dialog is made
+ * transparent everywhere the video should show through, and the page wash moves off
+ * the scrim onto `.modal-dim` at 70, underneath the video. Everything inside the
+ * modal then paints over the trailer for nothing: logo, Resume, progress, mute.
+ */
+
+/* The wash over the page. Below the player, so it never dims the video itself. */
+.modal-dim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, 0.75);
+  animation: fade 160ms ease-out;
+}
+
+/*
+ * Scroll container and click-to-close target only — deliberately no background.
+ * It is above the player, so any paint here would land on top of the trailer.
+ */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  overflow-y: auto;
+  padding: 3rem 1rem;
+  animation: fade 160ms ease-out;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/*
+ * Transparent, NOT #181818. The hero region has to let the player behind it through;
+ * the opaque panel background lives on `.modal-panel` instead.
+ */
+.modal {
+  max-width: 56rem;
+  margin: 0 auto;
+  background: transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);
+  animation: rise 220ms ease-out;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
+ * Top-right, on the same gutter as the content below it.
+ *
+ * `right: 3rem` is not arbitrary — it is `.modal-hero-content`'s padding, so the close
+ * button, the mute button and the right edge of the metadata column all share one
+ * vertical line instead of each sitting at its own inset.
+ */
+.modal-close {
+  position: absolute;
+  top: 1.5rem;
+  right: 3rem;
+  z-index: 4;
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(12, 12, 12, 0.6);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.modal-close svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  display: block;
+}
+
+.modal-close:hover {
+  background: rgba(30, 30, 30, 0.92);
+}
+
+.modal-close:active {
+  transform: scale(0.94);
+}
+
+/*
+ * Full-bleed and 16:9.
+ *
+ * It was `max-height: 26rem`, which squashed the box to about 2.08:1 — so the frame
+ * read as a letterbox strip rather than a hero, and the trailer had to be cropped
+ * hard to fill it. The viewport cap is there only so a short window cannot push the
+ * buttons off screen.
+ */
+.modal-hero {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  max-height: 62vh;
+  background: transparent;
+}
+
+/* What stands in before the trailer arrives, for a title without one, and offline. */
+.modal-hero-plate {
+  position: absolute;
+  inset: 0;
+  background: #101010;
+  transition: opacity 600ms ease;
+}
+
+.modal-hero-plate.is-hidden {
+  opacity: 0;
+}
+
+.modal-hero-plate img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/*
+ * The fade that joins the picture to the panel.
+ *
+ * Deep and early on purpose. Trailers carry burned-in captions and studio bugs along
+ * their bottom edge, and a shallow fade left them glowing through a murky band that
+ * read as subtitles printed UNDER the video. Anything down there is now properly
+ * buried, and the text laid over it stays legible.
+ */
+.modal-hero-fade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(24, 24, 24, 0) 0%,
+      rgba(24, 24, 24, 0) 32%,
+      rgba(24, 24, 24, 0.38) 56%,
+      rgba(24, 24, 24, 0.78) 72%,
+      /* Fully opaque well before the edge. A translucent tail is what let bright
+         subtitle text read through as a faint band under the picture — white on dark
+         survives even 10% transparency. The crop takes most of it; this takes the
+         rest. */
+      rgba(24, 24, 24, 1) 86%,
+      #181818 100%
+    ),
+    linear-gradient(90deg, rgba(24, 24, 24, 0.55) 0%, rgba(24, 24, 24, 0) 40%);
+}
+
+/* Lower-left, over the picture — where a detail page puts its identity. */
+.modal-hero-content {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0 3rem 2.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.modal-logo {
+  max-width: 21rem;
+  max-height: 7rem;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 12px rgba(0, 0, 0, 0.85));
+}
+
+.modal-title {
+  font-size: 2.4rem;
+  line-height: 1.1;
+  text-shadow: 0 3px 12px rgba(0, 0, 0, 0.85);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  align-self: stretch;
+}
+
+/*
+ * Far right of the action row, on the Play button's baseline — and on the same gutter
+ * as `.modal-close` above it, because the row stretches to the content padding.
+ */
+.trailer-mute {
+  margin-left: auto;
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(20, 20, 20, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+.offline-note {
+  color: #d2d2d2;
+  font-size: 0.9rem;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+}
+
+.resume-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 24rem;
+  align-self: stretch;
+}
+
+.resume-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.32);
+  overflow: hidden;
+}
+
+.resume-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--red);
+}
+
+.resume-label {
+  font-size: 0.82rem;
+  color: #e5e5e5;
+  white-space: nowrap;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+}
+
+/* Everything below the picture. This is what carries the dialog's background. */
+.modal-panel {
+  background: #181818;
+}
+
+.modal-body {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 2rem;
+  padding: 0.75rem 3rem 2.5rem;
+}
+
+.modal-meta {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  color: #bcbcbc;
+  font-size: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+
+.tagline {
+  font-style: italic;
+  color: #c6c6c6;
+  margin-bottom: 0.6rem;
+}
+
+.overview {
+  line-height: 1.55;
+  color: #e6e6e6;
+}
+
+.modal-side {
+  font-size: 0.85rem;
+  color: #b8b8b8;
+  line-height: 1.7;
+}
+
+.modal-side .label {
+  color: #777;
+}
+
+.file-line {
+  color: #7d7d7d;
+  font-size: 0.8rem;
+}
+
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2a1010;
+  border: 1px solid var(--red);
+  color: #fff;
+  padding: 0.85rem 1.5rem;
+  border-radius: 4px;
+  z-index: 200;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+/* --- scan button on a library card --------------------------------------- */
+
+/*
+ * Deliberately quiet: it sits under the path and should read as an affordance, not
+ * compete with the card itself. It only appears on connected drives, because
+ * scanning one that is unplugged cannot work.
+ */
+.card-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: var(--card);
+}
+
+/* Pinned to the bottom of the stretched column — see .picker-row. */
+.card-slot .scan-button {
+  margin-top: auto;
+}
+
+/*
+ * The duplicate note settles in rather than appearing mid-layout.
+ *
+ * It is the one piece of card text that arrives asynchronously, after a scan has
+ * worked out that the same film is on two drives.
+ */
+.meta-duplicates {
+  animation: settle-in 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.scan-button {
+  background: none;
+  font: inherit;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-dim);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 3px;
+  padding: 0.22rem 0.7rem;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease;
+  /*
+   * Tabular figures and a floor on the width, because this label changes while you
+   * watch it — "Rescan" to "0/12" to "10/12" to "Saving…". Without both, the button
+   * resizes on almost every tick and the whole row shuffles sideways.
+   */
+  font-variant-numeric: tabular-nums;
+  min-width: 5.25rem;
+  text-align: center;
+}
+
+.card-slot:hover .scan-button {
+  color: #cfcfcf;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.scan-button:hover:not(:disabled) {
+  color: #fff;
+  border-color: #fff;
+}
+
+.scan-button:disabled { opacity: 0.5; cursor: default; }
+
+/*
+ * Reserved space for whatever the app is currently saying.
+ *
+ * Tall enough for the live progress block — a heading, a bar and a filename — which is
+ * the tallest of the ordinary states, so scanning, finishing, fetching artwork and
+ * going quiet all happen without a single pixel of layout moving. The rare tall state
+ * (a list of files missing from the drive) is still allowed to grow; it is an alert,
+ * and it eases in rather than snapping.
+ */
+.picker-status {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  width: 100%;
+  min-height: 4.25rem;
+}
+
+.picker-status-item {
+  animation: settle-in 280ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes settle-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- live progress --- */
+
+.scan-live {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: 22rem;
+  max-width: 100%;
+}
+
+.scan-live-head {
+  color: var(--muted);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.scan-live-head strong {
+  color: #e5e5e5;
+  font-weight: 600;
+}
+
+.scan-count {
+  color: var(--muted-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-bar {
+  display: block;
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.scan-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--red);
+  border-radius: 2px;
+  /* The bar carries the movement so the NUMBERS do not have to. */
+  transition: width 260ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Before a total is known, sweep rather than sit at a dead zero. */
+.scan-bar > span.is-waiting {
+  width: 35%;
+  animation: scan-sweep 1200ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  transition: none;
+}
+
+@keyframes scan-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(340%);
+  }
+}
+
+/*
+ * One line, always. A filename that changes length several times a second would
+ * otherwise reflow the block under it on every file.
+ */
+.scan-file {
+  color: var(--muted-dim);
+  font-size: 0.75rem;
+  width: 100%;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scan-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+  max-width: 34rem;
+}
+.scan-result strong { color: #e5e5e5; font-weight: 600; }
+
+.scan-missing {
+  margin-top: 0.6rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid rgba(229, 9, 20, 0.35);
+  border-radius: 4px;
+  background: rgba(229, 9, 20, 0.06);
+}
+.scan-missing p { color: #e5e5e5; margin-bottom: 0.35rem; }
+.scan-missing ul { list-style: none; color: var(--muted-dim); font-size: 0.8rem; }
+.scan-missing li { padding: 0.1rem 0; }
+
+.ghost-button.small {
+  margin-top: 0.6rem;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.scan-error { color: var(--red); font-size: 0.85rem; }
+
+.scan-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+  max-width: 30rem;
+}
+.scan-hint code {
+  background: #232323;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+}
+
+/* Quiet, factual: the state matters but should not shout over the library itself. */
+.badge-borrowed {
+  color: #8a8a8a;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+}
+
+.token-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 30rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.token-prompt p { color: #e5e5e5; }
+.token-prompt span { color: #777; font-size: 0.75rem; }
+
+.token-row { display: flex; gap: 0.5rem; width: 100%; }
+.token-row input {
+  flex: 1;
+  background: #1a1a1a;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: #e5e5e5;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.7rem;
+}
+.token-row input:focus { outline: none; border-color: #777; }
+
+/* --- combined "all films" card ------------------------------------------- */
+
+/*
+ * A quiet outline rather than a colour or a badge. The card already looks different
+ * (stacked shelves) and sits first; shouting about it would make the real libraries
+ * beside it feel secondary, which is the wrong hierarchy — those are the things that
+ * actually exist.
+ */
+/*
+ * Mark the face, not the whole slot — the card element includes the label, so an
+ * outline there drew a box around the caption too.
+ */
+.card-slot.is-combined .face {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+.card-slot.is-combined .card:hover .face {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.34);
+}
+
+/* Wraps rather than truncating — a clipped explanation explains nothing. */
+.meta-duplicates {
+  color: #6f6f6f;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  white-space: normal;
+  text-align: center;
+  max-width: 100%;
+}
+
+/*
+ * Without a hero there is nothing to tuck under, so the negative offset that slides
+ * rows into the hero gradient would hide the first row title behind the nav instead.
+ */
+.rows.rows-bare {
+  margin-top: 0;
+  padding-top: 5.5rem;
+}
+
+/* --- wordmark -------------------------------------------------------------- */
+
+/*
+ * The mark identifies the app and does nothing else. It used to double as the only
+ * way back to the library picker, which is why nobody found that exit — a logo does
+ * not look clickable. Navigation now lives in the control beside it.
+ */
+.nav-mark {
+  flex: none;
+  margin-right: 0.5rem;
+  /* The artwork's arc puts its optical centre slightly above its box centre. */
+  transform: translateY(-1px);
+}
+
+.picker-mark {
+  margin: 0 auto 1.4rem;
+}
+
+/* --- trailer ---------------------------------------------------------------- */
+
+/*
+ * The layer sits above the backdrop, which stays mounted underneath as the fallback
+ * for not-yet-loaded, no-trailer and offline. Nothing here is clickable except the
+ * sound button — see the note on pointer events below.
+ */
+/*
+ * The one player, fixed to the viewport and moved over whichever surface claims it.
+ * Fixed rather than absolute so a single element can sit over a portalled hover card
+ * and a modal without re-parenting — re-parenting an iframe reloads it.
+ */
+.trailer-host {
+  position: fixed;
+  /*
+   * Above BOTH surfaces it serves. It sat at 60 — tying with .hover-card and losing to
+   * .modal-scrim at 80 — so the player rendered perfectly and was painted over by the
+   * very card it was meant to fill. A fixed element cannot be above the modal's
+   * backdrop and below the modal's text at once, which is why the hero content sits
+   * BELOW the video — see the modal section, which now inverts this for the dialog.
+   */
+  z-index: 95;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/*
+ * Armed only while the player is handing over between surfaces.
+ *
+ * The transition is what makes hover → modal read as the card growing into the dialog.
+ * It used to be permanent, which meant it also applied to the per-frame updates that
+ * track scrolling — so the video eased 260ms behind the page and read as a separate
+ * object floating over it rather than part of the surface. Untransitioned, a scroll
+ * update lands on the exact frame it was measured for.
+ */
+.trailer-host.is-moving {
+  transition: left 260ms cubic-bezier(0.4, 0, 0.2, 1),
+              top 260ms cubic-bezier(0.4, 0, 0.2, 1),
+              width 260ms cubic-bezier(0.4, 0, 0.2, 1),
+              height 260ms cubic-bezier(0.4, 0, 0.2, 1),
+              border-radius 260ms ease;
+}
+
+/*
+ * Scaled past the container and cropped.
+ *
+ * YouTube's watermark and residual furniture live at the edges of the player. Blowing
+ * the frame up and clipping it pushes them outside the visible box — the part that
+ * `controls=0` and `modestbranding` cannot remove on their own.
+ *
+ * `pointer-events: none` is the other half: almost all of YouTube's overlay chrome
+ * only appears on hover, so a player that never sees a pointer never draws it.
+ */
+/*
+ * Size comes from the component, NOT from a percentage here.
+ *
+ * `width: 132%; height: 132%` made the frame the same shape as its container, and the
+ * container is not 16:9 — `.modal-hero` renders about 2.08:1 once `max-height` bites.
+ * YouTube then letterboxed the video inside the frame and the hero showed black bars.
+ * `coverFrame` solves for a true 16:9 box that covers the surface, which CSS cannot do
+ * against an unknown aspect. The overscan it adds is what crops YouTube's chrome.
+ */
+.trailer-video {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border: 0;
+  pointer-events: none;
+  /* Crossfade in only once the video is genuinely playing, so the cut never lands on
+     a black frame. */
+  opacity: 0;
+  transition: opacity 500ms ease;
+}
+
+.trailer-video.is-playing {
+  opacity: 1;
+}
+
+/* --- loader --- */
+
+/*
+ * A thin line filling across the bottom of the artwork. A spinner would be louder than
+ * the thing it is waiting for; a hover card that sits still for a second reads as
+ * broken rather than busy, so it needs something — just not much.
+ */
+/*
+ * The sheet that keeps the pointer out of YouTube's frame.
+ *
+ * `pointer-events: none` on the iframe cannot be trusted here: a cross-origin embed is
+ * an out-of-process frame, and the compositor hit-tests it directly, so the player sees
+ * hover regardless of what the parent document says. It then draws its centred
+ * transport controls, which sit in the MIDDLE of the picture where no crop can reach
+ * them. An in-process element occupying the same box is the only thing that reliably
+ * stops that.
+ */
+.trailer-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: auto;
+  background: transparent;
+}
+
+/*
+ * Gradient over the frame's top and bottom edges.
+ *
+ * Cropping alone cannot clear YouTube's chrome. The title bar is shown for the first
+ * few seconds of every embed whatever `controls=0` says, and its height does not scale
+ * with the player — cropping far enough to lose it on a 320px hover card would throw
+ * away a third of the picture. `modestbranding` has been ignored since 2023, so it
+ * cannot help either.
+ *
+ * The bottom half does a second job: the player sits ABOVE both surfaces (z-index 95),
+ * so on the hover card it paints over that card's own edge. Fading into
+ * #181818 — the background of both surfaces — puts that blend back and is what makes
+ * the video read as part of the panel rather than a rectangle pasted onto it.
+ */
+.trailer-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  /* Top only. YouTube's title bar is shown for the first seconds of every embed
+     whatever `controls=0` says, and its height does not scale with the player. */
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.16) 6%, transparent 15%);
+  opacity: 0;
+  /* Arrives with the video, so a card whose trailer never loads is not dimmed. */
+  transition: opacity 500ms ease;
+}
+
+.trailer-veil.is-playing {
+  opacity: 1;
+}
+
+/*
+ * The fade into the panel, for the hover card only.
+ *
+ * The card is painted UNDER the player, so the player has to draw this blend itself
+ * or the video ends in a hard edge against the card body. The modal is the other way
+ * round — it sits above the video and draws its own `.modal-hero-fade`, so adding one
+ * here too would darken it twice over.
+ */
+.trailer-veil.with-base {
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.16) 6%, transparent 15%),
+    linear-gradient(0deg, #181818 0%, #181818 7%, rgba(24, 24, 24, 0.7) 14%, transparent 34%);
+}
+
+.trailer-loader {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  z-index: 3;
+}
+
+.trailer-loader span {
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: var(--red);
+  border-radius: 2px;
+  animation: trailer-sweep 1100ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes trailer-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* --- sound --- */
+
+/*
+ * The one interactive element in the layer, so it opts back in to pointer events.
+ * Circular and outlined rather than filled, matching the hover card's own buttons.
+ */
+.trailer-sound {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 4;
+  pointer-events: auto;
+
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+
+  opacity: 0;
+  animation: trailer-fade-in 400ms ease 200ms both;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.trailer-sound:hover {
+  border-color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  transform: scale(1.08);
+}
+
+.trailer-sound svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+@keyframes trailer-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/*
+ * The backdrop fades down rather than disappearing, so the transition is a dissolve
+ * between two images rather than a cut to black.
+ */
+.hover-art img,
+.modal-hero .modal-backdrop {
+  transition: opacity 500ms ease;
+}
+
+/* Logo and metadata must stay legible over moving video. */
+.hover-art > .logo,
+.modal-hero > .logo,
+.hover-art > .offline-pill {
+  z-index: 5;
+}

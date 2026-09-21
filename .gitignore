@@ -1,0 +1,13 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+
+# Secrets. .env.example is committed as the template.
+.env
+
+# Library data — yours, not the project's. See data/README.md.
+/data/db/
+/data/state/
+/data/cache/
