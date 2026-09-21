@@ -52,7 +52,7 @@ npm install -g pnpm
 ```
 
 ```bash
-git clone https://github.com/<you>/nerdflix.git && cd nerdflix
+git clone https://github.com/iamdebasis/NERDFLIX.git && cd NERDFLIX
 pnpm install
 pnpm app
 ```
