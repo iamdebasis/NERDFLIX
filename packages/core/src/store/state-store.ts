@@ -9,9 +9,14 @@
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { StateFileSchema, type Progress, type StateFile } from '../schema/index.js';
+import {
+  StateFileSchema,
+  type Progress,
+  type StateFile,
+  type TrackChoice,
+} from '../schema/index.js';
 
-const EMPTY: StateFile = { version: 1, progress: {}, myList: [], thumbs: {} };
+const EMPTY: StateFile = { version: 1, progress: {}, myList: [], thumbs: {}, tracks: {} };
 
 export class StateStore {
   private cache?: StateFile;
@@ -116,6 +121,26 @@ export class StateStore {
     const s = await this.load();
     if (value === null) delete s.thumbs[titleId];
     else s.thumbs[titleId] = value;
+    await this.queueWrite();
+  }
+
+  async getTracks(titleId: string): Promise<TrackChoice | null> {
+    return (await this.load()).tracks[titleId] ?? null;
+  }
+
+  /**
+   * Record a track choice. `undefined` for a field CLEARS it, which is how "let the
+   * player decide" is expressed — not the same as subtitles off, which is `'no'`.
+   */
+  async setTracks(titleId: string, choice: TrackChoice): Promise<void> {
+    const s = await this.load();
+    const next: TrackChoice = { ...s.tracks[titleId], ...choice };
+    if (choice.audio === undefined) delete next.audio;
+    if (choice.subtitle === undefined) delete next.subtitle;
+
+    if (next.audio === undefined && next.subtitle === undefined) delete s.tracks[titleId];
+    else s.tracks[titleId] = next;
+
     await this.queueWrite();
   }
 

@@ -23,13 +23,25 @@ export type AudioTrack = {
   bitrateKbps?: number;
   /** Lossless formats macOS must decode to PCM; object layers are lost. */
   objectAudio: boolean;
+  isDefault: boolean;
 };
+
+/**
+ * Bumped whenever this module learns to read something new from a stream.
+ *
+ * A rescan re-probes any media entry stamped with an older value and refreshes its
+ * technical fields. The re-probe is free at that point: ffprobe has already run,
+ * because `contentId` needs the duration.
+ */
+export const PROBE_VERSION = 1;
 
 export type SubtitleTrack = {
   index: number;
   format: string;
   lang?: string;
+  title?: string;
   forced: boolean;
+  isDefault: boolean;
 };
 
 export type Chapter = { title: string; startSec: number };
@@ -141,6 +153,7 @@ export async function probe(path: string, sizeBytes: number): Promise<ProbeResul
         title: s.tags?.title,
         bitrateKbps: s.bit_rate ? Math.round(Number(s.bit_rate) / 1000) : undefined,
         objectAudio: /truehd|eac3/i.test(codecName) || /atmos|dts:?x/i.test(profile),
+        isDefault: s.disposition?.default === 1,
       };
     });
 
@@ -150,7 +163,9 @@ export async function probe(path: string, sizeBytes: number): Promise<ProbeResul
       index: Number(s.index),
       format: String(s.codec_name ?? 'unknown'),
       lang: s.tags?.language,
+      title: s.tags?.title,
       forced: s.disposition?.forced === 1,
+      isDefault: s.disposition?.default === 1,
     }));
 
   const chapters: Chapter[] = (data.chapters ?? []).map((c: any) => ({

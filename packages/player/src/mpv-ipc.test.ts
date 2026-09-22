@@ -443,7 +443,8 @@ describe('playback status reports reality, not config', () => {
     hwdec: 'videotoolbox',
     targetPeak: 'auto',
     renderer: 'mpv' as const,
-    audio: { codec: 'truehd', inChannels: 8, outChannels: 2, layout: 'stereo', ao: 'coreaudio' },
+    audio: { codec: 'truehd', inChannels: 8, outChannels: 2, layout: 'stereo', ao: 'coreaudio', trackId: 1, trackTitle: null, trackCount: 1 },
+    subtitle: { trackId: null, trackTitle: null, trackCount: 0 },
   };
 
   test('confirms HDR only when it was requested AND survived', () => {
@@ -694,7 +695,8 @@ describe('status when a host app renders', () => {
     output: { primaries: 'bt.709', gamma: 'bt.1886', isHdr: false },
     hwdec: 'videotoolbox',
     targetPeak: 'auto',
-    audio: { codec: 'dts', inChannels: 6, outChannels: 2, layout: 'stereo', ao: 'coreaudio' },
+    audio: { codec: 'dts', inChannels: 6, outChannels: 2, layout: 'stereo', ao: 'coreaudio', trackId: 1, trackTitle: null, trackCount: 1 },
+    subtitle: { trackId: null, trackTitle: null, trackCount: 0 },
   };
 
   test('does not claim tone-mapping it cannot observe', () => {
@@ -733,7 +735,8 @@ describe('HDR verdict depends on who is rendering', () => {
     output: { primaries: 'bt.2020', gamma: 'pq', isHdr: true },
     hwdec: 'videotoolbox',
     targetPeak: 'auto',
-    audio: { codec: 'dts', inChannels: 6, outChannels: 2, layout: 'stereo', ao: 'coreaudio' },
+    audio: { codec: 'dts', inChannels: 6, outChannels: 2, layout: 'stereo', ao: 'coreaudio', trackId: 1, trackTitle: null, trackCount: 1 },
+    subtitle: { trackId: null, trackTitle: null, trackCount: 0 },
   };
 
   test('a host renderer is never accused of tone-mapping', () => {

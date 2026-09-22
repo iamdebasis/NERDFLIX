@@ -16,6 +16,8 @@ export const AudioTrackSchema = z.object({
   lang: z.string().optional(),
   title: z.string().optional(),
   bitrateKbps: z.number().optional(),
+  /** The container's default disposition — what a player picks when told nothing. */
+  isDefault: z.boolean().default(false),
   /**
    * TrueHD/E-AC3 with an object layer. macOS cannot bitstream these, so they decode
    * to a PCM bed and the object metadata is lost — the UI must say so honestly.
@@ -25,8 +27,14 @@ export const AudioTrackSchema = z.object({
 
 export const SubtitleTrackSchema = z.object({
   lang: z.string().optional(),
+  /**
+   * The track's own name. Without it a disc's twenty-five subtitle tracks collapse to
+   * a list of languages where "English" appears twice and only one is SDH.
+   */
+  title: z.string().optional(),
   format: z.string(),
   forced: z.boolean().default(false),
+  isDefault: z.boolean().default(false),
 });
 
 export const ChapterSchema = z.object({
@@ -60,6 +68,16 @@ export const MediaFileSchema = z.object({
    * scan/content-id.ts for why location could never be.
    */
   contentId: z.string(),
+  /**
+   * Which probe produced the technical fields below.
+   *
+   * Identical bytes mean identical technical FACTS, but not identical DERIVED ones:
+   * when ffprobe mapping learns to read something new, a stored entry is stale even
+   * though the file has not changed. Without this, `contentId` stands in for "we
+   * already know everything about this file" and a rescan silently skips it forever.
+   * See PROBE_VERSION in scan/probe.ts.
+   */
+  probeVersion: z.number().int().default(0),
   /** Everywhere this file has been observed, newest first. */
   sightings: z.array(SightingSchema).default([]),
   /** The original scene string, verbatim. Never rewritten. */
@@ -251,12 +269,30 @@ export const ProgressSchema = z.object({
   lastPlayedAt: z.string(),
 });
 
+/**
+ * Which tracks you chose for a film, remembered between sessions.
+ *
+ * Kept OUT of `ProgressSchema` on purpose: choosing the director's commentary before
+ * pressing play is a decision that exists whether or not you have watched a second of
+ * it, and progress records only appear once playback starts.
+ *
+ * `audio` and `subtitle` are mpv track ids, and `'no'` means subtitles off — a real
+ * choice, distinct from the `undefined` that means "never chosen, let the player
+ * decide".
+ */
+export const TrackChoiceSchema = z.object({
+  audio: z.number().int().positive().optional(),
+  subtitle: z.union([z.number().int().positive(), z.literal('no')]).optional(),
+});
+
 export const StateFileSchema = z.object({
   version: z.literal(1),
   progress: z.record(z.string(), ProgressSchema).default({}),
   myList: z.array(z.string()).default([]),
   thumbs: z.record(z.string(), z.enum(['up', 'down'])).default({}),
+  tracks: z.record(z.string(), TrackChoiceSchema).default({}),
 });
 
 export type Progress = z.infer<typeof ProgressSchema>;
+export type TrackChoice = z.infer<typeof TrackChoiceSchema>;
 export type StateFile = z.infer<typeof StateFileSchema>;

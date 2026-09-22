@@ -264,6 +264,62 @@ depend on the blanket `.nav button` no-drag rule. Verify these with a REAL mouse
 (`Input.dispatchMouseEvent`) — `element.click()` ignores `-webkit-app-region` entirely
 and will pass against a control that is dead to an actual pointer.
 
+## The track picker
+
+mpv and IINA both have their own track menus, so this is not a replacement for them.
+It answers a different question: which track the film STARTS on. Fumbling through
+twenty-five subtitle entries in a player menu while the opening plays is the thing
+worth avoiding, and "does this disc have the director's commentary" is a browse-time
+question that should not require launching anything.
+
+**`aid`/`sid` are 1-based WITHIN THEIR OWN TYPE, and are not ffprobe stream indices.**
+Stream 3 of a file may be a subtitle while the third audio track is still `aid=3`. The
+array position carries the mapping, because `probe.ts` builds each list by filtering
+streams in container order, which is the order mpv numbers them in. Verified against a
+real remux rather than assumed: ffprobe's four audio streams for Cars came back from
+mpv as `--aid=1..4`, same order, same titles, and `--aid=3 --sid=2` selected exactly
+the commentary and the SDH track the picker labels 3 and 2.
+
+**Unset means unset.** A field the user has not chosen is never sent, so mpv and IINA
+apply their own rules — preferred language, forced flags, the container's default
+disposition. Overriding those with a guess would change playback for everyone who
+never opens the picker, which is not a trade a new feature gets to make. "Automatic" is
+therefore a real option in the list, not a pre-selected default track.
+
+**The choice is remembered in `state/`**, and `library:play` falls back to it when no
+choice is passed. The picker lives in the detail view, but Play also exists on the
+billboard and the hover card — without the fallback, choosing the commentary and then
+starting the film from a poster would silently play the feature mix instead.
+
+**A wrong track is the quietest failure in the app**: the device opens, the channel
+counts are right, nothing errors, and you are simply listening to a commentary. So
+`status.ts` reads `track-list` back and names the active track whenever the file has
+more than one, and `warnTrackMismatch` says so when the player did not honour the
+request. Same reason the HDR verdict is read back rather than inferred.
+
+A native `<select>`, deliberately: a disc can carry forty-seven subtitle tracks, and a
+custom popup for that means writing scrolling, keyboard navigation and focus trapping
+to arrive back where the platform already is. Only the closed control is styled.
+
+## Identical bytes do not mean identical knowledge
+
+`contentId` answers "is this the same file". The rescan path also used it to answer "do
+we already know everything about this file", which is a different question — so when
+`probe.ts` learned to read subtitle titles and default dispositions, every stored entry
+was stale while its contentId still matched, and the rescan meant to pick the new
+fields up skipped all fourteen files and reported them "unchanged".
+
+`PROBE_VERSION` stamps each media entry with the probe that wrote it, and a rescan
+refreshes any entry carrying an older stamp. It is free at that point: ffprobe has
+already run, because the contentId needs the duration. `refreshTechnical` copies field
+by field rather than spreading, because the fresh probe carries ONE sighting and
+overwriting `sightings` would erase every other place that content has been seen.
+
+Bump `PROBE_VERSION` whenever the ffprobe mapping learns something new. This is the
+same shape as `DERIVE_VERSION` for TMDB, and the same lesson twice: a cache key that
+means "unchanged input" is not a licence to skip recomputing derived output. The scan
+summary prints `N re-probed`, or a rewritten record hides inside "unchanged".
+
 ## No required terminal commands
 
 `pnpm install` then `pnpm app` is the entire user-facing surface. Adding a library,

@@ -15,6 +15,7 @@
 
 import { relative } from 'node:path';
 import type { ScanReport, ScannedTitle } from '../scan/scan.js';
+import { PROBE_VERSION } from '../scan/probe.js';
 import type { LibraryRoot, MediaFile, Sighting, Title } from '../schema/index.js';
 import { makeSlug, makeSortTitle, MetaStore } from '../store/meta-store.js';
 
@@ -32,6 +33,8 @@ export type IngestStats = {
   created: number;
   updated: number;
   unchanged: number;
+  /** Files whose technical fields were refreshed under a newer probe. */
+  reprobed: number;
   /** Known content found at a new path on this volume. */
   relocated: number;
   /** Known content seen on this volume for the first time — a copy from elsewhere. */
@@ -90,10 +93,46 @@ function toMediaFile(t: ScannedTitle, root: LibraryRoot, rootPath: string): Medi
       title: a.title,
       bitrateKbps: a.bitrateKbps,
       objectAudio: a.objectAudio,
+      isDefault: a.isDefault,
     })),
-    subtitles: p.subtitles.map((s) => ({ lang: s.lang, format: s.format, forced: s.forced })),
+    probeVersion: PROBE_VERSION,
+    subtitles: p.subtitles.map((s) => ({
+      lang: s.lang,
+      title: s.title,
+      format: s.format,
+      forced: s.forced,
+      isDefault: s.isDefault,
+    })),
     chapters: p.chapters,
   };
+}
+
+/**
+ * Copy the technical fields from a fresh probe onto an existing entry.
+ *
+ * Deliberately field by field rather than a spread: `sightings` describes WHERE the
+ * file has been seen and is accumulated over time, so overwriting it with a single
+ * fresh sighting would throw away every other place this content has been found.
+ * `edition` and the release fields likewise come from the name, not the stream.
+ */
+function refreshTechnical(target: MediaFile, fresh: MediaFile): void {
+  target.container = fresh.container;
+  target.videoCodec = fresh.videoCodec;
+  target.profile = fresh.profile;
+  target.resolution = fresh.resolution;
+  target.width = fresh.width;
+  target.height = fresh.height;
+  target.bitDepth = fresh.bitDepth;
+  target.hdr = fresh.hdr;
+  target.dvProfile = fresh.dvProfile;
+  target.bitrateMbps = fresh.bitrateMbps;
+  target.sizeBytes = fresh.sizeBytes;
+  target.durationSec = fresh.durationSec;
+  target.frameRate = fresh.frameRate;
+  target.audio = fresh.audio;
+  target.subtitles = fresh.subtitles;
+  target.chapters = fresh.chapters;
+  target.probeVersion = fresh.probeVersion;
 }
 
 /** Record that this file is (still) here, without duplicating the sighting. */
@@ -125,6 +164,7 @@ export async function ingest(
     created: 0,
     updated: 0,
     unchanged: 0,
+    reprobed: 0,
     relocated: 0,
     alreadyKnown: 0,
     editionsAdded: 0,
@@ -160,12 +200,28 @@ export async function ingest(
 
     const known = byContent.get(media.contentId);
     if (known) {
-      // Identical content means identical technical facts, so there is nothing to
-      // update on the media entry — only where it now lives.
+      // Identical content means identical technical facts, so normally there is
+      // nothing to update on the media entry — only where it now lives.
       const how = noteSighting(known.media, sighting);
       if (how === 'moved') stats.relocated += 1;
       else if (how === 'new') stats.alreadyKnown += 1;
       else stats.unchanged += 1;
+
+      /**
+       * Unless WE have changed.
+       *
+       * The bytes being identical does not make our reading of them current: when the
+       * probe learns to read a new field, every stored entry is stale while its
+       * `contentId` still matches — so the rescan that was meant to pick the field up
+       * skips the file entirely and the backfill silently never happens.
+       *
+       * Refreshing costs nothing here: ffprobe has already run on this file, because
+       * the contentId needs its duration.
+       */
+      if (known.media.probeVersion < PROBE_VERSION) {
+        refreshTechnical(known.media, media);
+        stats.reprobed += 1;
+      }
 
       await store.save(known.title);
       continue;

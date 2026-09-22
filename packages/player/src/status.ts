@@ -11,7 +11,7 @@
  * shown beside the output so a mismatch is visible rather than inferred.
  */
 
-import type { PlaybackEngine } from './engine.js';
+import type { MpvTrack, PlaybackEngine } from './engine.js';
 
 export type PlaybackStatus = {
   /** What the file contains. */
@@ -54,8 +54,37 @@ export type PlaybackStatus = {
     outChannels: number | null;
     layout: string | null;
     ao: string | null;
+    /**
+     * WHICH track is playing, read back from mpv.
+     *
+     * Selecting the wrong one of four audio tracks is the quietest failure in the
+     * app: a commentary plays instead of the feature, every other reading looks
+     * healthy, and nothing errors. So it is reported rather than assumed, for the
+     * same reason HDR is.
+     */
+    trackId: number | null;
+    trackTitle: string | null;
+    trackCount: number;
+  };
+  subtitle: {
+    /** `null` means no subtitle track is active, which is usually correct. */
+    trackId: number | null;
+    trackTitle: string | null;
+    trackCount: number;
   };
 };
+
+/** The track mpv says is selected, and how many of that type exist. */
+function selectedTrack(
+  tracks: MpvTrack[],
+  type: 'audio' | 'sub',
+): { id: number | null; title: string | null; count: number } {
+  const ofType = tracks.filter((t) => t.type === type);
+  const active = ofType.find((t) => t.selected);
+  if (!active) return { id: null, title: null, count: ofType.length };
+  const label = active.title ?? [active.lang, active.codec].filter(Boolean).join(' ');
+  return { id: active.id, title: label || null, count: ofType.length };
+}
 
 /** PQ or HLG transfer means the content carries an HDR signal. */
 function hdrGamma(gamma: string | null): boolean {
@@ -143,6 +172,12 @@ export async function readPlaybackStatus(
   const peak = await get<string>('target-peak');
   const vo = await get<string>('current-vo');
 
+  // One read covers both: `track-list` says which of each type is selected, so the
+  // answer cannot disagree with itself the way two separate aid/sid reads could.
+  const trackList = (await get<MpvTrack[]>('track-list')) ?? [];
+  const audioTrack = selectedTrack(trackList, 'audio');
+  const subTrack = selectedTrack(trackList, 'sub');
+
   const sourceHdr = hdrGamma(srcGamma);
   const outputHdr = hdrGamma(outGamma);
 
@@ -174,6 +209,14 @@ export async function readPlaybackStatus(
       outChannels: outCh,
       layout,
       ao,
+      trackId: audioTrack.id,
+      trackTitle: audioTrack.title,
+      trackCount: audioTrack.count,
+    },
+    subtitle: {
+      trackId: subTrack.id,
+      trackTitle: subTrack.title,
+      trackCount: subTrack.count,
     },
   };
 }
@@ -274,6 +317,30 @@ export function formatStatus(s: PlaybackStatus): string[] {
     lines.push(
       `  ${C.dim}audio ${a.codec ?? '?'} ${a.inChannels ?? '?'}ch → ${a.outChannels}ch` +
         `${a.layout ? ` (${a.layout})` : ''}${down} via ${a.ao ?? '?'}${C.reset}`,
+    );
+  }
+
+  /**
+   * Name the track when the file has a choice of them.
+   *
+   * On a single-track file this is noise. On a disc with a feature mix and two
+   * commentaries it is the difference between "audio is working" and "audio is
+   * working and it is the right one" — and the wrong one produces no error at all.
+   */
+  if (a.trackCount > 1) {
+    lines.push(
+      `  ${C.dim}audio track ${a.trackId ?? '?'} of ${a.trackCount}` +
+        `${a.trackTitle ? ` · ${a.trackTitle}` : ''}${C.reset}`,
+    );
+  }
+
+  const sub = s.subtitle;
+  if (sub.trackCount > 0) {
+    lines.push(
+      sub.trackId === null
+        ? `  ${C.dim}subtitles off ${C.dim}(${sub.trackCount} available)${C.reset}`
+        : `  ${C.dim}subtitles track ${sub.trackId} of ${sub.trackCount}` +
+          `${sub.trackTitle ? ` · ${sub.trackTitle}` : ''}${C.reset}`,
     );
   }
 

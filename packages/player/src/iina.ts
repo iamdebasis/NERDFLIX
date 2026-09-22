@@ -135,6 +135,16 @@ export class IinaEngine implements PlaybackEngine {
       // `--mpv-` is the documented passthrough for ordinary mpv options.
       args.push(`--mpv-start=${Math.floor(opts.startAt)}`);
     }
+    /**
+     * Track selection goes through the same passthrough.
+     *
+     * It has to be set at LAUNCH rather than over IPC after the fact: switching audio
+     * a second into playback is audible, and IINA has already opened the default
+     * track's device by then. Unset means unset — IINA applies its own preferences,
+     * which is what should happen when nobody has chosen.
+     */
+    if (opts.audioTrack !== undefined) args.push(`--mpv-aid=${opts.audioTrack}`);
+    if (opts.subtitleTrack !== undefined) args.push(`--mpv-sid=${opts.subtitleTrack}`);
     args.push(path);
 
     spawn(this.cli!, args, { stdio: 'ignore', detached: true }).unref();

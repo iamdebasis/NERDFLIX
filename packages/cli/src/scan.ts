@@ -186,6 +186,9 @@ async function main() {
         `    ${C.green}${stats.created} new${C.reset} · ${stats.updated} updated · ` +
           `${C.dim}${stats.unchanged} unchanged${C.reset}` +
           (stats.editionsAdded ? ` · ${C.cyan}${stats.editionsAdded} extra editions${C.reset}` : '') +
+          // Otherwise a re-probe is invisible, and "unchanged" would be a lie about
+          // records that were just rewritten.
+          (stats.reprobed ? ` · ${C.cyan}${stats.reprobed} re-probed${C.reset}` : '') +
           (stats.skippedConfirmed ? ` · ${C.dim}${stats.skippedConfirmed} confirmed, left alone${C.reset}` : ''),
       );
       if (false) {

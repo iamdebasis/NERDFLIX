@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { BrowseData, TitleCard } from '../../shared/types';
+import type {
+  BrowseData,
+  TitleCard,
+  TrackChoice,
+  TrackInfo,
+  TrackOption,
+} from '../../shared/types';
 import { Wordmark } from './Wordmark';
 import { HeroTrailer } from './HeroTrailer';
 import { HERO_DISSOLVE_MS, buildHeroQueue, nextHeroIndex } from './hero-trailer';
@@ -295,6 +301,55 @@ function HoverCard({
 
 // --- Detail modal -----------------------------------------------------------
 
+/**
+ * One track choice.
+ *
+ * A native `<select>`, deliberately. A disc can carry twenty-five subtitle tracks, and
+ * a custom popup for that means writing scrolling, keyboard navigation and focus
+ * trapping to arrive back where the platform already is. Only the closed control is
+ * styled; the menu is the system's.
+ */
+function TrackSelect({
+  label,
+  options,
+  value,
+  onChange,
+  offLabel,
+}: {
+  label: string;
+  options: TrackOption[];
+  /** `undefined` is "not chosen" — the player applies its own rules. */
+  value: number | 'no' | undefined;
+  onChange: (value: number | 'no' | undefined) => void;
+  /** Subtitles can be switched off, which is a different thing from not choosing. */
+  offLabel?: string;
+}) {
+  return (
+    <label className="track-select">
+      <span className="track-select-label">{label}</span>
+      <select
+        value={value === undefined ? '' : String(value)}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange(v === '' ? undefined : v === 'no' ? 'no' : Number(v));
+        }}
+      >
+        {/* Not a track: it means "say nothing to the player", which is what happens
+            for anyone who never opens this. */}
+        <option value="">Automatic</option>
+        {offLabel && <option value="no">{offLabel}</option>}
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.isCommentary ? `\u25CB ${o.label}` : o.label}
+            {o.detail ? ` — ${o.detail}` : ''}
+            {o.isDefault ? ' (default)' : ''}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function DetailModal({
   card,
   onClose,
@@ -304,7 +359,7 @@ function DetailModal({
 }: {
   card: TitleCard;
   onClose: () => void;
-  onPlay: () => void;
+  onPlay: (tracks?: TrackChoice) => void;
   onToggleList: () => void;
   /** A film is being opened; the dialog stays until it is running. */
   starting: boolean;
@@ -316,6 +371,33 @@ function DetailModal({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  /**
+   * What is in the file, fetched when the dialog opens rather than carried on every
+   * browse card — a remux's track table is large and only this surface wants it.
+   */
+  const [tracks, setTracks] = useState<TrackInfo | null>(null);
+  const [audio, setAudio] = useState<number | undefined>();
+  const [subtitle, setSubtitle] = useState<number | 'no' | undefined>();
+
+  useEffect(() => {
+    let live = true;
+    setTracks(null);
+    window.playback
+      .tracks(card.id)
+      .then((info) => {
+        if (!live) return;
+        setTracks(info);
+        // Start from whatever was chosen last time, so reopening shows the truth.
+        setAudio(info.choice?.audio);
+        setSubtitle(info.choice?.subtitle);
+      })
+      // A missing track table costs the picker, not the dialog.
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [card.id]);
 
   // Computed in the main process from the real duration — never re-derived here from
   // `runtimeMinutes`, which is whole minutes, absent before enrichment, and 0 for
@@ -395,7 +477,7 @@ function DetailModal({
               <div className="modal-actions">
                 <button
                   className="play-button"
-                  onClick={onPlay}
+                  onClick={() => onPlay({ audio, subtitle })}
                   disabled={!card.available || starting}
                 >
                   {starting ? <IconSpinner /> : <IconPlay />}
@@ -421,6 +503,39 @@ function DetailModal({
           </div>
 
           <div className="modal-panel">
+            {/*
+              * Shown only when there is a decision to make — one audio track and no
+              * subtitles is not a choice, and a control that cannot change anything
+              * is the same fault the browse filters avoid.
+              *
+              * It belongs here rather than in the action row above: crowding Play with
+              * two dropdowns buries the button the dialog exists for.
+              */}
+            {tracks && (tracks.audio.length > 1 || tracks.subtitles.length > 0) && (
+              <div className="track-picker">
+                {tracks.audio.length > 1 && (
+                  <TrackSelect
+                    label="Audio"
+                    options={tracks.audio}
+                    value={audio}
+                    // No "off" option is offered for audio, so 'no' cannot arrive —
+                    // narrowed here rather than cast, so adding one later is a type
+                    // error instead of a silently ignored value.
+                    onChange={(v) => setAudio(v === 'no' ? undefined : v)}
+                  />
+                )}
+                {tracks.subtitles.length > 0 && (
+                  <TrackSelect
+                    label="Subtitles"
+                    options={tracks.subtitles}
+                    value={subtitle}
+                    onChange={setSubtitle}
+                    offLabel="Off"
+                  />
+                )}
+              </div>
+            )}
+
             <div className="modal-body">
               <div>
                 <div className="modal-meta">
@@ -633,12 +748,14 @@ export function Browse({
    * If it fails, the surface stays put and says why, which is the only moment the
    * context is still useful.
    */
-  const play = async (titleId: string, fromStart = false) => {
+  const play = async (titleId: string, fromStart = false, tracks?: TrackChoice) => {
     setPlayError(null);
     suspendTrailer();
     setStarting(true);
     try {
-      await window.playback.play(titleId, 0, fromStart);
+      // Only the detail view carries a picker. Everywhere else sends nothing, and the
+      // main process falls back to whatever was chosen for this film last time.
+      await window.playback.play(titleId, { fromStart, tracks });
       setHover(null);
       setOpen(null);
     } catch (err) {
@@ -1168,7 +1285,7 @@ export function Browse({
         <DetailModal
           card={open}
           onClose={() => setOpen(null)}
-          onPlay={() => void play(open.id)}
+          onPlay={(tracks) => void play(open.id, false, tracks)}
           onToggleList={() => void toggleList(open)}
           starting={starting}
         />

@@ -32,6 +32,20 @@ export type LibraryCard = {
   availableCount: number;
 };
 
+/**
+ * One selectable track, already labelled by the main process.
+ *
+ * `id` is mpv's `aid`/`sid` — 1-based within its own type — not an ffprobe stream
+ * index. The renderer passes it straight back and never does arithmetic on it.
+ */
+export type TrackOption = {
+  id: number;
+  label: string;
+  detail?: string;
+  isDefault: boolean;
+  isCommentary: boolean;
+};
+
 export type TitleCard = {
   id: string;
   title: string;
@@ -137,7 +151,34 @@ export type LibraryApi = {
   toggleMyList(titleId: string): Promise<boolean>;
 };
 
+/** mpv ids, or `'no'` for subtitles off. Absent means "let the player decide". */
+export type TrackChoice = { audio?: number; subtitle?: number | 'no' };
+
+export type TrackInfo = {
+  audio: TrackOption[];
+  subtitles: TrackOption[];
+  /** What was chosen last time, if anything. */
+  choice: TrackChoice | null;
+};
+
+export type PlayOptions = {
+  versionIndex?: number;
+  fromStart?: boolean;
+  /**
+   * Passed to the player only for the fields actually set. Sending nothing lets mpv
+   * and IINA apply their own selection rules, which is what happens for anyone who
+   * never opens the picker — so the feature cannot change playback by existing.
+   */
+  tracks?: TrackChoice;
+};
+
 export type PlaybackApi = {
-  play(titleId: string, versionIndex?: number, fromStart?: boolean): Promise<{ ok: boolean }>;
+  play(titleId: string, opts?: PlayOptions): Promise<{ ok: boolean }>;
   stop(): Promise<void>;
+  /**
+   * Fetched when the detail view opens rather than shipped on every card: a remux can
+   * carry twenty-five subtitle tracks, and the browse payload should not grow by the
+   * whole disc's track table for every film in the library.
+   */
+  tracks(titleId: string, versionIndex?: number): Promise<TrackInfo>;
 };

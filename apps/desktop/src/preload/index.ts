@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { BrowseData, LibraryApi, LibraryCard, PlaybackApi } from '../shared/types.js';
+import type {
+  BrowseData,
+  LibraryApi,
+  LibraryCard,
+  PlaybackApi,
+  TrackInfo,
+} from '../shared/types.js';
 
 /**
  * The only bridge between renderer and disk. Per ARCHITECTURE.md §4 the renderer
@@ -34,9 +40,11 @@ const api: LibraryApi = {
 };
 
 const playback: PlaybackApi = {
-  play: (titleId, versionIndex, fromStart) =>
-    ipcRenderer.invoke('library:play', titleId, versionIndex, fromStart) as Promise<{ ok: boolean }>,
+  play: (titleId, opts) =>
+    ipcRenderer.invoke('library:play', titleId, opts) as Promise<{ ok: boolean }>,
   stop: () => ipcRenderer.invoke('library:stop') as Promise<void>,
+  tracks: (titleId, versionIndex) =>
+    ipcRenderer.invoke('library:tracks', titleId, versionIndex) as Promise<TrackInfo>,
 };
 
 contextBridge.exposeInMainWorld('libraries', api);

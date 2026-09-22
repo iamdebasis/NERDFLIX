@@ -28,7 +28,10 @@ import {
   QUALITY_TIERS,
   formatStatus,
   readPlaybackStatus,
+  type PlaybackStatus,
 } from '@nfl/player';
+import type { PlayOptions, TrackChoice, TrackInfo } from '../shared/types.js';
+import { trackOptionsFor } from './tracks.js';
 
 type Engine = ExternalMpvEngine | IinaEngine;
 let engine: Engine | null = null;
@@ -60,6 +63,53 @@ async function chooseEngineKind(): Promise<'iina' | 'mpv'> {
   return cli ? 'iina' : 'mpv';
 }
 
+/**
+ * Only the fields the user actually chose.
+ *
+ * An unset field must stay unset rather than becoming a default, because mpv and IINA
+ * each have their own selection rules — preferred language, forced flags, the
+ * container's default disposition — and overriding them with a guess would change
+ * playback for everyone who never opens the picker.
+ */
+function trackLoadOptions(tracks: TrackChoice | undefined): {
+  audioTrack?: number;
+  subtitleTrack?: number | 'no';
+} {
+  if (!tracks) return {};
+  return {
+    ...(tracks.audio !== undefined ? { audioTrack: tracks.audio } : {}),
+    ...(tracks.subtitle !== undefined ? { subtitleTrack: tracks.subtitle } : {}),
+  };
+}
+
+/**
+ * Say so when the player did not honour the choice.
+ *
+ * Every other symptom of a wrong track looks healthy — the device opens, the channel
+ * counts are right, nothing errors. The only way to notice is to compare what was
+ * asked for against what `track-list` says is selected, which is the same reason the
+ * HDR verdict is read back rather than inferred from the config.
+ */
+function warnTrackMismatch(status: PlaybackStatus, tracks: TrackChoice | undefined): void {
+  if (!tracks) return;
+
+  if (tracks.audio !== undefined && status.audio.trackId !== tracks.audio) {
+    console.log(
+      `  \x1b[33m⚠ asked for audio track ${tracks.audio}, playing ` +
+        `${status.audio.trackId ?? 'none'}\x1b[0m`,
+    );
+  }
+
+  // 'no' means off, which reads back as a null track id rather than an id of 'no'.
+  const wantedSub = tracks.subtitle === 'no' ? null : tracks.subtitle;
+  if (tracks.subtitle !== undefined && status.subtitle.trackId !== wantedSub) {
+    console.log(
+      `  \x1b[33m⚠ asked for subtitles ${tracks.subtitle}, showing ` +
+        `${status.subtitle.trackId ?? 'none'}\x1b[0m`,
+    );
+  }
+}
+
 type Deps = {
   store: MetaStore;
   state: StateStore;
@@ -68,11 +118,39 @@ type Deps = {
 };
 
 export function registerPlaybackIpc(deps: Deps): void {
+  /**
+   * What is in the file, and what was chosen for it last time.
+   *
+   * On demand rather than on every browse card — see `PlaybackApi.tracks`.
+   */
+  ipcMain.handle('library:tracks', async (_e, id: string, versionIndex = 0): Promise<TrackInfo> => {
+    const title = await deps.store.get(id);
+    if (!title) throw new Error('Title not found');
+    const { audio, subtitles } = trackOptionsFor(title, versionIndex);
+    return { audio, subtitles, choice: await deps.state.getTracks(id) };
+  });
+
   ipcMain.handle(
     'library:play',
-    async (_e, id: string, versionIndex = 0, fromStart = false) => {
+    async (_e, id: string, opts: PlayOptions = {}) => {
+      const { versionIndex = 0, fromStart = false, tracks } = opts;
       const title = await deps.store.get(id);
       if (!title) throw new Error('Title not found');
+
+      /**
+       * An explicit choice wins and is remembered; otherwise the last one stands.
+       *
+       * The picker lives in the detail view, but Play also exists on the billboard and
+       * the hover card. Without this fallback, choosing the commentary and then
+       * starting the film from a poster would silently play the feature mix instead —
+       * the remembered choice would only apply when you happened to use the one
+       * button that carries it.
+       *
+       * `state/` is the right home: it survives a rescan or a prune, because it is
+       * the user's decision rather than anything derived from the file.
+       */
+      if (tracks) await deps.state.setTracks(id, tracks);
+      const chosenTracks = tracks ?? (await deps.state.getTracks(id)) ?? undefined;
 
       const resolver = new MediaResolver(deps.getStates());
       const availability = resolver.resolve(title, versionIndex);
@@ -112,13 +190,17 @@ export function registerPlaybackIpc(deps: Deps): void {
         });
         engine = iina;
         await iina.start();
-        await iina.load(availability.absolutePath, { startAt: progress?.positionSec });
+        await iina.load(availability.absolutePath, {
+          startAt: progress?.positionSec,
+          ...trackLoadOptions(chosenTracks),
+        });
         iina.play();
 
         console.log(`\n▶ ${displayTitle}  \x1b[2m(IINA)\x1b[0m`);
         try {
-          for (const line of formatStatus(await readPlaybackStatus(iina, { renderer: 'host' })))
-            console.log(line);
+          const status = await readPlaybackStatus(iina, { renderer: 'host' });
+          for (const line of formatStatus(status)) console.log(line);
+          warnTrackMismatch(status, chosenTracks);
         } catch {
           /* playback still works; only the report is missing */
         }
@@ -196,7 +278,10 @@ export function registerPlaybackIpc(deps: Deps): void {
       });
 
       await engine.start();
-      await engine.load(availability.absolutePath, { startAt: progress?.positionSec });
+      await engine.load(availability.absolutePath, {
+        startAt: progress?.positionSec,
+        ...trackLoadOptions(chosenTracks),
+      });
       engine.play();
 
       /**
@@ -211,6 +296,7 @@ export function registerPlaybackIpc(deps: Deps): void {
           const status = await readPlaybackStatus(engine!);
           console.log(`\n▶ ${displayTitle}`);
           for (const line of formatStatus(status)) console.log(line);
+          warnTrackMismatch(status, chosenTracks);
           // Say WHY the tier was chosen. 'balanced' on a 16-core machine looks like a
           // bug unless it is clear whether that is the content, the hardware, or a
           // measured ceiling from a previous session.

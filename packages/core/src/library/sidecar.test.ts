@@ -19,6 +19,7 @@ function media(over: Partial<MediaFile> = {}): MediaFile {
   return {
     contentId: 'c1-filmmkv',
     sightings: [{ volumeId: 'vol-a', relPath: 'film.mkv', fingerprint: 'fp', lastSeen: '2026-01-01T00:00:00Z' }],
+    probeVersion: 0,
     releaseName: 'Film.2020',
     releaseAttributes: [],
     container: 'matroska',

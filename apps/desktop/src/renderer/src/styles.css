@@ -2204,3 +2204,75 @@ body {
 .row-grid .tile {
   width: 100%;
 }
+
+/* ------------------------------------------------------------------ *
+ * Track picker
+ *
+ * Under the hero rather than beside Play: two dropdowns in the action row bury the
+ * button the dialog exists for. It shares the modal's right gutter (3rem) so it sits
+ * on the same margin as everything else in the panel.
+ * ------------------------------------------------------------------ */
+
+.track-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  padding: 1.25rem 3rem 0;
+}
+
+.track-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.track-select-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/*
+ * Only the closed control is ours. The open menu is the system's, which is what makes
+ * twenty-five subtitle tracks usable without writing scrolling and keyboard handling.
+ */
+.track-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  max-width: 22rem;
+  /* Room for the chevron drawn in the background, or a long track name runs under it. */
+  padding: 0.45rem 2rem 0.45rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.5);
+  color: #e5e5e5;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  /* An inline SVG chevron — no file to load, and it cannot go missing. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.55rem center;
+  background-size: 0.9rem;
+  /* A disc-authored track name is a paragraph; the control stays one line. */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.track-select select:hover { border-color: rgba(255, 255, 255, 0.45); color: #fff; }
+.track-select select:focus-visible {
+  outline: none;
+  border-color: #fff;
+  background-color: rgba(0, 0, 0, 0.75);
+}
+
+/* The native menu draws with the system palette, so give it a readable one. */
+.track-select option {
+  background: #1c1c1c;
+  color: #e5e5e5;
+}
