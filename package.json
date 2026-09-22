@@ -20,7 +20,9 @@
     "postinstall": "node scripts/ensure-electron.mjs",
     "app:fix": "node node_modules/electron/install.js",
     "enrich": "pnpm --filter @nfl/cli run enrich",
-    "dist": "pnpm --filter @nfl/desktop run dist"
+    "dist": "pnpm --filter @nfl/desktop run dist",
+    "app:debug": "pnpm --filter @nfl/desktop exec electron-vite dev -- --remote-debugging-port=9222",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
