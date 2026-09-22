@@ -1,3 +1,6 @@
+// FIRST, always: it decides where data lives before anything reads that. See data-dir.ts.
+import './data-dir.js';
+
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { watch } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
@@ -196,7 +199,8 @@ function registerIpc(): void {
     );
     if (pending.length === 0) return { skipped: null, matched: 0, failed: 0 };
 
-    const client = new TmdbClient(token, join(PATHS.cacheDir, 'tmdb'));
+    // TmdbClient appends 'tmdb' itself — passing it here too produced cache/tmdb/tmdb/.
+    const client = new TmdbClient(token, PATHS.cacheDir);
     let matched = 0;
     let failed = 0;
 

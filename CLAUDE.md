@@ -897,6 +897,45 @@ saying nothing.
 Per-directory overrides (`NFL_DB_DIR`, `NFL_STATE_DIR`, `NFL_CACHE_DIR`) still win,
 which is how the tests point elsewhere.
 
+## Packaging (the DMG)
+
+`pnpm dist` → `apps/desktop/release/Nerdflix-<version>-arm64.dmg`. Config lives in
+`apps/desktop/electron-builder.yml`.
+
+It packages cleanly only because electron-vite already emits a self-contained `out/` —
+every `@nfl/*` package is compiled in and only `electron` stays external — so there is
+no `node_modules` to ship and none of the usual pnpm hoisting pain.
+
+Four things that each broke the build or the built app:
+
+- **Electron must be PINNED, not a range.** electron-builder downloads a specific
+  platform binary and cannot resolve `^44.3.0`. Pinning is right anyway: Electron is a
+  runtime, not a library to float.
+- **`identity: null`.** Signing needs a paid Apple Developer account. Forcing a
+  signature without one produces an app that fails to launch, which is worse than one
+  that warns. Unsigned means right-click → Open the first time, and the README says so.
+- **`pnpm.ignoredBuiltDependencies: [electron-winstaller]`.** A Windows-only transitive
+  dep whose blocked build script fails the entire install. We only ever target macOS.
+- **The packaged app needs `data-dir.ts`, imported FIRST in main.** See below.
+
+**Where a packaged build keeps data — and why `app.setName` is load-bearing.**
+`findProjectRoot` looks upward for `pnpm-workspace.yaml`; inside a `.app` there is none,
+so it falls back to counting directories and lands inside the bundle — read-only, and
+replaced on every update. A packaged build therefore sets `NFL_DATA_DIR` explicitly.
+
+But `app.getPath('userData')` derives from `package.json`'s `name`, which in this
+workspace is `@nfl/desktop` — so the first build created a literal **`@nfl` folder** in
+the user's Application Support. `app.setName('Nerdflix')` has to run before any
+`getPath` call, which is why that module is the first import in `main/index.ts`
+(`dataPaths()` runs at module scope, and imports evaluate in order).
+
+Our data then goes in a `data/` SUBFOLDER of userData, not loose in it: Electron keeps
+Chromium's caches, session storage and preferences there, and a library sitting among
+them invites "clear the app's data" taking watch history with it.
+
+Verified on a real packaged build: `~/Library/Application Support/Nerdflix/data/{db,state,cache}`,
+and nothing written inside the bundle.
+
 ## electron-vite bundling
 
 `electron` MUST stay external in the main and preload builds. The npm `electron`

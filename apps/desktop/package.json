@@ -1,16 +1,19 @@
 {
   "name": "@nfl/desktop",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "preview": "electron-vite preview"
+    "preview": "electron-vite preview",
+    "dist": "electron-vite build && electron-builder --config electron-builder.yml"
   },
   "dependencies": {
     "@nfl/core": "workspace:*",
     "@nfl/player": "workspace:*"
-  }
+  },
+  "description": "A Netflix-style front end for a local film collection",
+  "author": "iamdebasis"
 }

@@ -1,0 +1,50 @@
+# Packaging for distribution. See the README for how to run it.
+#
+# The app bundles cleanly because electron-vite already produces a self-contained
+# `out/` — every @nfl/* workspace package is compiled in, and only `electron` itself
+# stays external. So there is no node_modules to ship and no hoisting to fight, which
+# is the usual pain of packaging from a pnpm workspace.
+
+appId: com.nerdflix.app
+productName: Nerdflix
+copyright: MIT
+
+directories:
+  output: release
+  buildResources: build
+
+# `out/` is the built app; package.json is needed for the entry point and version.
+files:
+  - out/**/*
+  - package.json
+
+mac:
+  category: public.app-category.entertainment
+  icon: build/icon.icns
+  # Apple Silicon only — the playback path depends on VideoToolbox and CoreAudio, and
+  # an Intel build would be untested rather than merely slower.
+  target:
+    - target: dmg
+      arch: [arm64]
+  # UNSIGNED. Signing needs a paid Apple Developer account; without one, forcing a
+  # signature produces a build that fails to launch rather than one that warns. The
+  # README tells people to right-click → Open the first time, which is the documented
+  # way past Gatekeeper for an unsigned app.
+  identity: null
+  # The app reads video files the user chooses, from external drives.
+  extendInfo:
+    NSDesktopFolderUsageDescription: Nerdflix needs access to read the films you add from this folder.
+    NSDocumentsFolderUsageDescription: Nerdflix needs access to read the films you add from this folder.
+    NSDownloadsFolderUsageDescription: Nerdflix needs access to read the films you add from this folder.
+    NSRemovableVolumesUsageDescription: Nerdflix reads films from your external drives. It never writes to them.
+
+dmg:
+  # The familiar drag-to-Applications window.
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications

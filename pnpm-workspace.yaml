@@ -8,3 +8,4 @@ allowBuilds:
   esbuild: false
   # Electron's postinstall downloads the actual runtime. Without this there is no app.
   electron: true
+  electron-winstaller: set this to true or false

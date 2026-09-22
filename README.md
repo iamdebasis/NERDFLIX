@@ -45,13 +45,27 @@ VideoToolbox, CoreAudio and macOS volume semantics.
 
 ## Quick start
 
-```bash
-brew install node ffmpeg mpv
-brew install --cask iina          # optional but recommended
-npm install -g pnpm
-```
+Install the players it drives, then the app:
 
 ```bash
+brew install ffmpeg mpv
+brew install --cask iina          # optional but recommended — better HDR on Apple silicon
+```
+
+**Download the latest `.dmg` from [Releases](https://github.com/iamdebasis/NERDFLIX/releases)**, open
+it, and drag Nerdflix to Applications.
+
+The build is not code-signed — signing requires a paid Apple Developer account — so the
+first launch needs **right-click → Open** rather than a double-click, then *Open* in the
+dialog. macOS remembers the choice. Double-clicking an unsigned app instead shows
+"cannot be opened because Apple cannot check it for malicious software", which looks
+like a broken download but is just Gatekeeper.
+
+### Or run it from source
+
+```bash
+brew install node
+npm install -g pnpm
 git clone https://github.com/iamdebasis/NERDFLIX.git && cd NERDFLIX
 pnpm install
 pnpm app
@@ -85,13 +99,18 @@ No IINA? Everything works with mpv instead.
 
 ### Where your library lives
 
-Everything the app writes lives in one place: `data/` in the project root —
-`db/` (derived), `state/` (watch history and My List, never regenerated), `cache/`
-(disposable), and your `.env`.
+Everything the app writes lives in one directory — `db/` (derived), `state/` (watch
+history and My List, never regenerated), `cache/` (disposable), and your `.env`.
 
-It is gitignored, so **if you replace the project folder rather than updating it in
-place, copy `data/` across first** — or point `NFL_DATA_DIR` somewhere outside the
-project and it stops being a risk. `pnpm run doctor` prints which directory is in use.
+| how you run it | where that is |
+|---|---|
+| installed `.dmg` | `~/Library/Application Support/Nerdflix/data` |
+| from source | `data/` in the project folder |
+
+Running from source, it is gitignored — so **if you replace the project folder rather
+than updating it in place, copy `data/` across first**, or point `NFL_DATA_DIR`
+somewhere outside the project and it stops being a risk. `pnpm run doctor` prints which
+directory is in use.
 
 ---
 
@@ -246,7 +265,8 @@ rejected, so the same ground is not re-litigated.
 Everything below is optional — the app covers all of it.
 
 ```bash
-pnpm app                  # the application
+pnpm app                  # the application, from source
+pnpm dist                 # build a signed-less .dmg into apps/desktop/release/
 pnpm run doctor           # verify ffprobe, mpv, IINA, Electron runtime
 pnpm scan <path>          # scan a library root and print a report
 pnpm enrich               # TMDB metadata and artwork

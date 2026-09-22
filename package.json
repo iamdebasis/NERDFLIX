@@ -19,14 +19,16 @@
     "app:build": "pnpm --filter @nfl/desktop run build",
     "postinstall": "node scripts/ensure-electron.mjs",
     "app:fix": "node node_modules/electron/install.js",
-    "enrich": "pnpm --filter @nfl/cli run enrich"
+    "enrich": "pnpm --filter @nfl/cli run enrich",
+    "dist": "pnpm --filter @nfl/desktop run dist"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "electron": "^44.3.0",
+    "electron": "44.3.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "motion": "^13.3.0",
     "react": "^19.3.0",
@@ -34,5 +36,10 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^8.3.0"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "electron-winstaller"
+    ]
   }
 }

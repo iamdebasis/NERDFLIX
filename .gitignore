@@ -1,6 +1,8 @@
 node_modules/
 dist/
 out/
+# Packaged builds — a 122 MB DMG does not belong in git.
+release/
 *.log
 .DS_Store
 
