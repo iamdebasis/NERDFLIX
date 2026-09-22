@@ -119,6 +119,15 @@ export const TitleSchema = z.object({
   directors: z.array(z.string()).default([]),
   studio: z.string().optional(),
 
+  /** TMDB's franchise grouping. Two or more owned members become a row. */
+  collection: z.object({ id: z.number().int(), name: z.string() }).optional(),
+
+  /**
+   * Which derivation produced the fields above. A title matched under an older one is
+   * re-derived from the cached response — no network, no re-match. See DERIVE_VERSION.
+   */
+  derivedVersion: z.number().int().default(0),
+
   externalIds: ExternalIdsSchema.default({}),
 
   trailer: z

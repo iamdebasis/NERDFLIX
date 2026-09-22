@@ -210,6 +210,8 @@ export async function ingest(
       media: [media],
       similarIds: [],
       matchState: externalIds.imdbId || externalIds.tmdbId ? 'auto' : 'unmatched',
+      // Nothing derived from TMDB yet, so the first enrichment pass owns it.
+      derivedVersion: 0,
       matchConfidence: externalIds.imdbId || externalIds.tmdbId ? 1 : 0,
       matchWarnings: parsed.warnings,
       searchTitles: parsed.searchTitles,

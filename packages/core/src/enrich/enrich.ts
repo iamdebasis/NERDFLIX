@@ -18,9 +18,17 @@ import { SIDECAR_DIR, isWritable, writeTitleToDrive } from '../library/sidecar.j
 import { decide, scoreCandidate, type MatchScore } from './match.js';
 import { imageUrl, pickImage, TmdbClient, type TmdbMovie } from './tmdb.js';
 
+/**
+ * Bumped whenever `applyDetails` learns to derive something new from a response. A
+ * title stamped with an older value is re-derived from the cached JSON on the next
+ * pass — free, because the response is on disk, and safe, because re-deriving is not
+ * re-matching (§7.4).
+ */
+export const DERIVE_VERSION = 1;
+
 export type EnrichOutcome = {
   titleId: string;
-  status: 'matched' | 'review' | 'not-found' | 'skipped' | 'failed';
+  status: 'matched' | 'review' | 'not-found' | 'skipped' | 'failed' | 'rederived';
   matchedTo?: string;
   confidence?: number;
   reasons?: string[];
@@ -35,6 +43,26 @@ export type EnrichOptions = {
   skipArtwork?: boolean;
   onProgress?: (done: number, total: number, title: string) => void;
 };
+
+/**
+ * Whether a pass has anything to do for this title.
+ *
+ * Both callers pre-filter so they can show an honest "N of M" before starting, and the
+ * two filters had quietly drifted apart. The rule belongs in one place, next to the
+ * gate inside `enrichTitle` that it has to agree with.
+ */
+export function needsEnrichment(
+  title: Title,
+  opts: { force?: boolean; withArtwork?: boolean } = {},
+): boolean {
+  if (opts.force) return true;
+  if (title.matchState === 'unmatched' || title.matchState === 'review') return true;
+  if (!title.overview) return true;
+  if (opts.withArtwork && !title.artwork.poster) return true;
+  // Matched already, but derived under older rules. The response is cached, so this
+  // costs nothing and cannot re-match — see DERIVE_VERSION.
+  return title.derivedVersion < DERIVE_VERSION && Boolean(title.externalIds.tmdbId);
+}
 
 /** Where artwork goes: the drive when writable, so it travels with the films. */
 async function artworkDir(
@@ -103,6 +131,10 @@ function applyDetails(title: Title, movie: TmdbMovie, country: string): Title {
       .map((c) => ({ name: c.name, character: c.character })),
     directors,
     studio: movie.production_companies?.[0]?.name,
+    collection: movie.belongs_to_collection
+      ? { id: movie.belongs_to_collection.id, name: movie.belongs_to_collection.name }
+      : undefined,
+    derivedVersion: DERIVE_VERSION,
     externalIds: {
       ...title.externalIds,
       tmdbId: movie.id,
@@ -114,6 +146,33 @@ function applyDetails(title: Title, movie: TmdbMovie, country: string): Title {
   };
 }
 
+/**
+ * Re-apply `applyDetails` to an already-matched title from its cached response.
+ *
+ * Deliberately narrow: no search, no artwork, and `matchState` is left exactly as it
+ * was. `applyDetails` touches none of those, so spreading its result preserves a
+ * `confirmed` verdict and the posters already on disk.
+ */
+async function rederiveTitle(
+  title: Title,
+  client: TmdbClient,
+  store: MetaStore,
+  country: string,
+): Promise<EnrichOutcome> {
+  try {
+    const movie = await client.movieDetails(title.externalIds.tmdbId as number);
+    const updated = applyDetails(title, movie, country);
+    await store.save(updated);
+    return { titleId: title.id, status: 'rederived', matchedTo: movie.title };
+  } catch (err) {
+    return {
+      titleId: title.id,
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export async function enrichTitle(
   title: Title,
   client: TmdbClient,
@@ -123,11 +182,17 @@ export async function enrichTitle(
   country: string,
   opts: EnrichOptions = {},
 ): Promise<EnrichOutcome> {
-  // §7.4: a human correction is never undone by a later automated pass.
-  if (title.matchState === 'confirmed' && !opts.force) {
-    return { titleId: title.id, status: 'skipped' };
-  }
-  if (!opts.force && title.matchState === 'auto' && title.overview) {
+  // §7.4: a human correction is never undone by a later automated pass. `auto` with an
+  // overview is likewise already answered — neither needs matching again.
+  const settled =
+    title.matchState === 'confirmed' || (title.matchState === 'auto' && Boolean(title.overview));
+
+  if (settled && !opts.force) {
+    // Settled, but possibly derived under older rules. Re-deriving reads the cached
+    // response — no search, so the title cannot silently match differently later.
+    if (title.derivedVersion < DERIVE_VERSION && title.externalIds.tmdbId) {
+      return rederiveTitle(title, client, store, country);
+    }
     return { titleId: title.id, status: 'skipped' };
   }
 

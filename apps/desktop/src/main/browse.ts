@@ -19,6 +19,7 @@ import {
   type VolumeState,
 } from '@nfl/core';
 import type { BrowseData, TitleCard } from '../shared/types.js';
+import { buildRows } from './rows.js';
 
 /** titleId → absolute path on disk, rebuilt whenever the library is read. */
 const artworkIndex = new Map<string, string>();
@@ -119,6 +120,8 @@ export async function buildBrowseData(
       certification: t.certification,
       cast: t.cast.map((c) => c.name),
       directors: t.directors,
+      collection: t.collection,
+      addedAt: t.addedAt,
       poster: artUrl(t.id, 'poster.jpg', Boolean(t.artwork.poster)),
       backdrop: artUrl(t.id, 'backdrop.jpg', Boolean(t.artwork.backdrop)),
       logo: artUrl(t.id, 'logo.png', Boolean(t.artwork.logo)),
@@ -140,39 +143,10 @@ export async function buildBrowseData(
     };
   });
 
-  const byId = new Map(cards.map((c) => [c.id, c]));
-
-  /**
-   * Rows.
-   *
-   * Netflix builds these from viewing behaviour we do not have, so they are derived
-   * from what a personal library actually knows: what you started, what you saved,
-   * what arrived recently, and genre. A row with one item is noise, so genres only
-   * appear once they have two.
-   */
-  const rows: BrowseData['rows'] = [];
-
-  const continueIds = progress.map((p) => p.titleId).filter((id) => byId.has(id));
-  if (continueIds.length) rows.push({ title: 'Continue Watching', titleIds: continueIds });
-
-  const listIds = myList.filter((id) => byId.has(id));
-  if (listIds.length) rows.push({ title: 'My List', titleIds: listIds });
-
-  const recent = [...scoped]
-    .sort((a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? ''))
-    .map((t) => t.id);
-  if (recent.length) rows.push({ title: 'Recently Added', titleIds: recent });
-
-  const byGenre = new Map<string, string[]>();
-  for (const c of cards) {
-    for (const g of c.genres) {
-      if (!byGenre.has(g)) byGenre.set(g, []);
-      byGenre.get(g)!.push(c.id);
-    }
-  }
-  for (const [genre, ids] of [...byGenre.entries()].sort((a, b) => b[1].length - a[1].length)) {
-    if (ids.length >= 2) rows.push({ title: genre, titleIds: ids });
-  }
+  const rows = buildRows(cards, {
+    continueIds: progress.map((p) => p.titleId),
+    myListIds: myList,
+  });
 
   // The hero wants a backdrop and, ideally, a logo to lay over it.
   const hero =

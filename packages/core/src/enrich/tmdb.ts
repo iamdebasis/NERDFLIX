@@ -36,6 +36,7 @@ export type TmdbMovie = {
   tagline?: string;
   overview?: string;
   genres?: Array<{ id: number; name: string }>;
+  belongs_to_collection?: { id: number; name: string } | null;
   production_companies?: Array<{ name: string }>;
   credits?: {
     cast?: Array<{ name: string; character?: string; order: number }>;

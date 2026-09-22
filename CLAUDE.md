@@ -183,6 +183,39 @@ case and goes to review. Runtime from ffprobe corroborates but never overrules, 
 an alternate cut is still the same film. `runtimeMinutes` stays ffprobe's — it describes
 the file on disk, not TMDB's canonical cut.
 
+## Collections and re-deriving
+
+TMDB's `belongs_to_collection` was already in every cached response and was simply
+being dropped — a franchise row costs no network at all.
+
+Two or more OWNED members make a row (`MIN_ROW`). One film is not a collection, and a
+"Cars Collection" row over a single Cars is worse than no row. Members are in RELEASE
+order, because that is how a series is watched, and the row sits above genres because
+"Star Wars Collection" says more about a shelf than "Science Fiction" does.
+
+**Adding a derived field must not re-match anything.** `DERIVE_VERSION` stamps each
+record with the derivation that wrote it, and a title carrying an older stamp is
+re-derived from `cache/tmdb/<id>.json` — details only, no search, so a title that
+matched correctly once cannot silently match differently later (§7.4). Artwork and
+`matchState` are left untouched, which is what makes it safe to re-derive a `confirmed`
+title: re-deriving is not re-matching. Verified by running `pnpm run enrich` with a
+deliberately INVALID token — 11 of 14 titles re-derived cleanly and only the three still
+in `review` reached for the network and failed. Bump `DERIVE_VERSION` whenever
+`applyDetails` learns to read something new; that is the whole backfill mechanism.
+
+`needsEnrichment` is the single rule both callers pre-filter with. They had two
+different filters that had already drifted — the CLI tested `overview`, the app tested
+`overview` AND `artwork.poster` — and neither agreed with the gate inside `enrichTitle`,
+so the app queued titles it would then skip and the CLI never reached the re-derive
+branch at all. A caller-side filter that disagrees with the callee's gate is how a
+backfill silently does nothing.
+
+Row assembly is pure, in `apps/desktop/src/main/rows.ts`, because ordering is its entire
+substance and none of it is visible in a screenshot. Equal-sized rows break ties by
+NAME rather than relying on sort stability: the old inline version ordered genres by
+count alone, so two equally common genres came out in whatever order the library
+happened to load in.
+
 ## No required terminal commands
 
 `pnpm install` then `pnpm app` is the entire user-facing surface. Adding a library,

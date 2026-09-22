@@ -43,6 +43,10 @@ export type TitleCard = {
   certification?: string;
   cast: string[];
   directors: string[];
+  /** TMDB's franchise grouping, when the film is in one. Drives the collection rows. */
+  collection?: { id: number; name: string };
+  /** ISO timestamp of when the scanner first recorded it — the sort key for "recent". */
+  addedAt: string;
 
   /** media:// URLs, or null when that artwork was never downloaded. */
   poster: string | null;

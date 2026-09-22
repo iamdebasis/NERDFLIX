@@ -18,6 +18,7 @@ import {
   ingest,
   scanRoot,
   enrichTitle,
+  needsEnrichment,
   loadEnvFiles,
   TmdbClient,
   type VolumeState,
@@ -192,11 +193,10 @@ function registerIpc(): void {
     if (!token) return { skipped: 'no-token' as const, matched: 0, failed: 0 };
 
     const { titles } = await store.loadAll();
-    // Only what still needs it: 'confirmed' is a human decision and is never redone,
-    // and an already-enriched title has nothing to fetch.
-    const pending = titles.filter(
-      (t) => t.matchState !== 'confirmed' && (!t.overview || !t.artwork.poster),
-    );
+    // Only what still needs it. A 'confirmed' match is a human decision and is never
+    // redone, but it can still be re-derived from cache — `needsEnrichment` knows the
+    // difference, and `enrichTitle` enforces it.
+    const pending = titles.filter((t) => needsEnrichment(t, { withArtwork: true }));
     if (pending.length === 0) return { skipped: null, matched: 0, failed: 0 };
 
     // TmdbClient appends 'tmdb' itself — passing it here too produced cache/tmdb/tmdb/.

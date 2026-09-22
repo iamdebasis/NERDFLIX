@@ -46,6 +46,7 @@ function title(over: Partial<Title> = {}): Title {
     artwork: {},
     media: [media()],
     similarIds: [],
+    derivedVersion: 0,
     matchState: 'unmatched',
     matchConfidence: 0,
     matchWarnings: [],
