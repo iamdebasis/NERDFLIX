@@ -83,7 +83,19 @@ brew install --cask iina          # optional but recommended — better HDR on A
 `ffmpeg` provides `ffprobe`, which is how every technical fact about a file is read.
 `mpv` is the playback engine. IINA is optional and used automatically when present.
 
-### 2. Get the app running
+### 2. Get Nerdflix
+
+**[Download the latest `.dmg`](https://github.com/iamdebasis/NERDFLIX/releases/latest)**,
+open it, and drag Nerdflix to Applications.
+
+The build is **not code-signed** — signing requires a paid Apple Developer account — so
+the first launch needs **right-click → Open** rather than a double-click, then *Open* in
+the dialog. macOS remembers the choice. Double-clicking an unsigned app instead shows
+"cannot be opened because Apple cannot check it for malicious software", which looks
+like a broken download but is just Gatekeeper.
+
+<details>
+<summary><b>Or run it from source</b></summary>
 
 ```bash
 brew install node
@@ -106,6 +118,10 @@ pnpm run doctor     # note: 'run' is required — 'pnpm doctor' is pnpm's own co
 
 It prints the versions of ffprobe, mpv and IINA it can actually see, the Electron
 runtime's state, and which data directory is in use.
+
+Building your own `.dmg` is `pnpm dist`, which writes to `apps/desktop/release/`.
+
+</details>
 
 ### 3. Paste your TMDB token
 
@@ -143,18 +159,6 @@ input-ipc-server=/tmp/nerdflix-iina.sock
 Then quit IINA. Without it, films still play but watch progress cannot be tracked — so
 the app refuses to start that engine and tells you exactly what to paste, rather than
 silently losing your resume points.
-
-### Building a `.dmg`
-
-```bash
-pnpm dist        # → apps/desktop/release/Nerdflix-<version>-arm64.dmg
-```
-
-The build is **not code-signed** — signing requires a paid Apple Developer account — so
-the first launch needs **right-click → Open** rather than a double-click, then *Open* in
-the dialog. macOS remembers the choice. Double-clicking an unsigned app instead shows
-"cannot be opened because Apple cannot check it for malicious software", which looks
-like a broken download but is just Gatekeeper.
 
 ### Where your library lives
 
