@@ -6,7 +6,7 @@
 
 Browse your library like a streaming service. Play it like an audiophile.
 
-`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `267 tests`
+`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `290 tests`
 
 </div>
 
@@ -36,6 +36,9 @@ re-encoded, and nothing is ever written to your drives.**
 - **Sorts and filters** by title, year, runtime, file size, genre, resolution, HDR,
   unwatched and availability.
 - **Searches** across title, year, genre, director and cast.
+- **Picks the audio and subtitle track before the film starts**, with commentaries
+  labelled, so a disc with four audio mixes and forty-seven subtitle tracks opens on the
+  one you wanted. The choice is remembered per film.
 - **Plays through mpv or IINA** with HDR passthrough, hardware decode and quality that
   adapts to your machine in both directions — then reports what actually happened rather
   than what was requested.
@@ -52,6 +55,7 @@ re-encoded, and nothing is ever written to your drives.**
 | **Detail view.** Logo, resume progress, technical truth about the file: real resolution, real HDR format, real audio layout and bitrate — all read from the stream. | ![Detail](docs/screenshots/06-detail.jpg) |
 | **Sort and filter.** Facets come from your library, not a fixed list — a filter that cannot change the result is never offered, so nothing you press does nothing. | ![Filters](docs/screenshots/07-filters.jpg) |
 | **Results are a grid.** Searching, filtering or sorting collapses the shelves into one ordered set, because the size of the answer is the point. | ![Results grid](docs/screenshots/08-results-grid.jpg) |
+| **Choose the track before you start.** A remux carries the feature mix, commentaries and dozens of subtitle tracks. Pick them here rather than hunting through a player menu while the opening plays. | ![Track picker](docs/screenshots/09-track-picker.jpg) |
 | **Your drives, as they are.** Per-drive cards plus a combined view whose counts are deduplicated — the same film on two drives is one film, not two. | ![Library picker](docs/screenshots/01-library-picker.jpg) |
 
 ---
@@ -238,6 +242,18 @@ agreed with the gate inside the function they called — so the first backfill r
 "3 of 14 titles", and did nothing at all. A caller-side filter that disagrees with the
 callee's gate is how a migration silently no-ops.
 
+The same shape turned up again, from the other direction, when the track picker needed
+two fields ffprobe had never been asked for. Files are identified by a hash of their
+content, and the rescan path used that to answer a second question it was never asked:
+*do we already know everything about this file?* The bytes had not changed, so every
+stored record was skipped and the rescan meant to collect the new fields reported all
+fourteen "unchanged".
+
+A version stamp on each record fixes it, and the re-probe is free — ffprobe has already
+run, because the content hash needs the duration. **A cache key that means "the input
+is unchanged" is not a licence to skip recomputing the output**, because the code doing
+the deriving changes too. Twice now.
+
 ### One trailer player, moved rather than remounted
 
 Hovering a card plays the film's trailer where the artwork was, it keeps playing when
@@ -350,7 +366,7 @@ pnpm scan <path>          # scan a library root and print a report
 pnpm enrich               # TMDB metadata and artwork
 pnpm library [--review]   # list titles, availability, match warnings
 pnpm play <file>          # play with a terminal scrubber and live diagnostics
-pnpm test                 # 267 tests
+pnpm test                 # 290 tests
 pnpm typecheck
 ```
 
@@ -364,7 +380,7 @@ pnpm screenshots          # terminal 2 — writes docs/screenshots/
 
 ## Testing
 
-**267 tests**, run against real files and real behaviour rather than mocks — several
+**290 tests**, run against real files and real behaviour rather than mocks — several
 bugs here were only reproducible with genuine 4K HEVC and actual drive behaviour.
 
 The discovery tests build real directory trees in a temp dir and scan them, including
@@ -378,8 +394,6 @@ because a regression test that passes either way is worth nothing.
 
 Deliberately deferred, in rough priority order:
 
-- **An audio and subtitle track picker.** The engine already exposes track switching;
-  nothing in the UI reaches it yet.
 - **TV shows.** The schema has a place for them; the scanner is films-only.
 - **Scrub-preview thumbnails** — needs the `thumbfast` pattern (a second hidden mpv
   instance). A pre-generated sprite sheet is impossible on an 80 GB file.

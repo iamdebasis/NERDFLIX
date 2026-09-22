@@ -163,5 +163,58 @@ await park();
 await assert(`document.querySelectorAll('.row-grid > .tile').length >= 2`, 'the grid is empty');
 await shot('08-results-grid.jpg', 'a filtered result set, as a wrapping grid');
 
+// --- 9. the track picker ----------------------------------------------------
+await cdp.pointer(`document.querySelector('.filter-toggle')`, { click: true });
+await until(cdp, `Boolean(document.querySelector('.filter-panel'))`);
+await cdp.pointer(`document.querySelector('.filter-reset')`, { click: true });
+await cdp.pointer(`document.querySelector('.filter-backdrop')`, { click: true });
+await until(cdp, `!document.querySelector('.filter-panel')`);
+await cdp.eval(`document.querySelector('.browse').scrollTo({ top: 0 })`);
+await wait(600);
+
+/**
+ * Open the first film that actually has a choice to offer.
+ *
+ * A single-track file shows no picker at all, so naming a title here would quietly
+ * capture an empty dialog on any library but this one. The track table arrives on its
+ * own IPC round trip after the dialog opens, so each candidate is given a moment.
+ */
+let pickerShown = false;
+for (let i = 0; i < 6 && !pickerShown; i += 1) {
+  await cdp.pointer(`${ROW('Recently Added')}.querySelectorAll('.tile')[${i}]`, { click: true });
+  await until(cdp, `Boolean(document.querySelector('.modal-panel'))`);
+  pickerShown = await until(cdp, `document.querySelectorAll('.track-picker select').length >= 2`, {
+    timeout: 6000,
+  }).catch(() => false);
+  if (!pickerShown) {
+    await cdp.pointer(`document.querySelector('.modal-close')`, { click: true });
+    await until(cdp, `!document.querySelector('.modal-panel')`);
+    await wait(400);
+  }
+}
+if (!pickerShown) throw new Error('no title in Recently Added offers a track choice');
+
+/**
+ * Select a commentary if the disc carries one.
+ *
+ * A closed `<select>` reading "Automatic" says nothing about why the picker exists,
+ * and the OPEN menu is drawn by macOS rather than the page, so it cannot be captured
+ * at all — the chosen value is the only way to show the feature in a still.
+ */
+await cdp.eval(`
+  (() => {
+    const sel = document.querySelector('.track-picker select');
+    const pick = [...sel.options].find((o) => /commentar/i.test(o.text)) ?? sel.options[1];
+    if (!pick) return false;
+    const set = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    set.call(sel, pick.value);
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()
+`);
+await wait(CHROME_MS);
+await park();
+await shot('09-track-picker.jpg', 'audio and subtitles, chosen before playing');
+
 console.log(`\n${n} screenshots written to docs/screenshots/\n`);
 cdp.close();
