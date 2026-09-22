@@ -110,6 +110,7 @@ export async function buildBrowseData(
     return {
       id: t.id,
       title: t.title,
+      sortTitle: t.sortTitle,
       year: t.year,
       tagline: t.tagline,
       overview: t.overview,

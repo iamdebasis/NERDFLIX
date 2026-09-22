@@ -4,6 +4,19 @@ import { Wordmark } from './Wordmark';
 import { HeroTrailer } from './HeroTrailer';
 import { HERO_DISSOLVE_MS, buildHeroQueue, nextHeroIndex } from './hero-trailer';
 import {
+  DEFAULT_SORT,
+  NO_FILTERS,
+  SORTS,
+  activeCount,
+  applyFilters,
+  facets,
+  isNarrowed,
+  sortCards,
+  toggleValue,
+  type Filters,
+  type SortKey,
+} from './browse-filter';
+import {
   TrailerHost,
   TrailerSoundButton,
   resumeTrailer,
@@ -461,14 +474,29 @@ function DetailModal({
 
 // --- Row --------------------------------------------------------------------
 
+/**
+ * A shelf, either as a horizontal row or as a wrapping grid.
+ *
+ * Browsing is rows: a shelf is a slice of the library and its length is not the point.
+ * A RESULT — from search, from My List, from a filter — is a set, and its size is the
+ * whole point, so it wraps. Twelve results in a horizontal strip leave four fifths of
+ * the page black and read as a broken page rather than an answer.
+ *
+ * The grid is the easier of the two for the hover card: `.row-scroller` is
+ * `scroll-snap-type: x proximity`, and a scaling `.tile:hover` makes the browser
+ * re-snap and fire a scroll event with nothing having moved. A grid neither scrolls
+ * horizontally nor snaps, so that whole class of flicker cannot arise.
+ */
 function Row({
   title,
   cards,
+  layout = 'row',
   onHover,
   onOpen,
 }: {
   title: string;
   cards: TitleCard[];
+  layout?: 'row' | 'grid';
   onHover: (card: TitleCard, rect: DOMRect, el: HTMLElement) => void;
   onOpen: (card: TitleCard) => void;
 }) {
@@ -480,6 +508,43 @@ function Row({
     if (el) el.scrollBy({ left: dir * el.clientWidth * 0.9, behavior: 'smooth' });
   };
 
+  const tiles = cards.map((card) => (
+    <button
+      key={card.id}
+      className={`tile${card.available ? '' : ' offline'}`}
+      onClick={() => onOpen(card)}
+      onMouseEnter={(e) => {
+        const tile = e.currentTarget;
+        const rect = tile.getBoundingClientRect();
+        // Netflix waits before expanding, so travelling across a row does not
+        // fire a card under every tile on the way past.
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => onHover(card, rect, tile), 400);
+      }}
+      onMouseLeave={() => clearTimeout(timer.current)}
+    >
+      {card.poster ? (
+        <img src={card.poster} alt={card.title} draggable={false} />
+      ) : (
+        <div className="art-fallback">{card.title}</div>
+      )}
+      {card.resumePct !== null && (
+        <span className="tile-progress">
+          <span style={{ width: `${card.resumePct}%` }} />
+        </span>
+      )}
+    </button>
+  ));
+
+  if (layout === 'grid') {
+    return (
+      <section className="row is-grid">
+        <h2 className="row-title">{title}</h2>
+        <div className="row-grid">{tiles}</div>
+      </section>
+    );
+  }
+
   return (
     <section className="row">
       <h2 className="row-title">{title}</h2>
@@ -488,33 +553,7 @@ function Row({
           ‹
         </button>
         <div className="row-scroller" ref={scroller}>
-          {cards.map((card) => (
-            <button
-              key={card.id}
-              className={`tile${card.available ? '' : ' offline'}`}
-              onClick={() => onOpen(card)}
-              onMouseEnter={(e) => {
-                const tile = e.currentTarget;
-                const rect = tile.getBoundingClientRect();
-                // Netflix waits before expanding, so travelling across a row does not
-                // fire a card under every tile on the way past.
-                clearTimeout(timer.current);
-                timer.current = setTimeout(() => onHover(card, rect, tile), 400);
-              }}
-              onMouseLeave={() => clearTimeout(timer.current)}
-            >
-              {card.poster ? (
-                <img src={card.poster} alt={card.title} draggable={false} />
-              ) : (
-                <div className="art-fallback">{card.title}</div>
-              )}
-              {card.resumePct !== null && (
-                <span className="tile-progress">
-                  <span style={{ width: `${card.resumePct}%` }} />
-                </span>
-              )}
-            </button>
-          ))}
+          {tiles}
         </div>
         <button className="pager right" onClick={() => page(1)} aria-label="Scroll right">
           ›
@@ -550,6 +589,30 @@ export function Browse({
    * twenty-eight do not, and scrolling genre rows to find a specific film is hopeless.
    */
   const [query, setQuery] = useState('');
+
+  /**
+   * Sort and filter.
+   *
+   * Both narrow the shelf into ONE ordered set, exactly as search does, for the same
+   * reason: the same film under "Action", "Science Fiction" and "Recently Added" reads
+   * as three results. A sort counts as narrowing on its own — asking for the library
+   * in title order and getting genre rows each internally sorted is not what was asked.
+   */
+  const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  // Escape closes the panel. The detail modal has its own handler; this one only
+  // listens while the panel is actually open, so the two cannot fight over the key.
+  useEffect(() => {
+    if (!filterOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFilterOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [filterOpen]);
+
   const [playError, setPlayError] = useState<string | null>(null);
   /** A film is being opened. The surface stays up until it is actually running. */
   const [starting, setStarting] = useState(false);
@@ -738,18 +801,47 @@ export function Browse({
     c.directors.some((d) => d.toLowerCase().includes(q)) ||
     c.cast.some((n) => n.toLowerCase().includes(q));
 
-  const visibleRows = q
-    ? [{ title: `Results for “${query.trim()}”`, cards: allCards.filter(matches) }]
+  /**
+   * The view picks the base set, search narrows it, filters narrow it again, and a
+   * narrowed set is sorted. They compose rather than override each other: filtering
+   * search results, or sorting My List, are both reasonable things to want.
+   */
+  const base = view === 'list' ? allCards.filter((c) => c.inMyList) : allCards;
+  const searched = q ? base.filter(matches) : base;
+  const result = applyFilters(searched, filters);
+
+  const narrowed = isNarrowed(filters, sort);
+  const collapsed = Boolean(q) || view === 'list' || narrowed;
+
+  // Only a narrowed set is re-ordered. My List keeps the order things were added in
+  // and search keeps the library's, which is what each of them meant before.
+  const resultCards = narrowed ? sortCards(result, sort) : result;
+
+  const resultTitle = q
+    ? `Results for “${query.trim()}”`
     : view === 'list'
-      ? [{ title: 'My List', cards: allCards.filter((c) => c.inMyList) }]
-      : (data?.rows ?? []).map((row) => ({
-          title: row.title,
-          cards: row.titleIds.map((id) => byId.get(id)).filter(Boolean) as TitleCard[],
-        }));
+      ? 'My List'
+      : `${result.length} ${result.length === 1 ? 'film' : 'films'}`;
+
+  const visibleRows = collapsed
+    ? [{ title: resultTitle, cards: resultCards }]
+    : (data?.rows ?? []).map((row) => ({
+        title: row.title,
+        cards: row.titleIds.map((id) => byId.get(id)).filter(Boolean) as TitleCard[],
+      }));
+
+  // Offered from what the library actually holds, never a fixed list — a pill that
+  // cannot change the result set is a control that looks broken when you press it.
+  const available = facets(base);
+  const filterCount = activeCount(filters);
+  const resetFilters = () => {
+    setFilters(NO_FILTERS);
+    setSort(DEFAULT_SORT);
+  };
 
   // The hero belongs to the full browse. Over a filtered view it is just a large
   // picture of something you did not ask for.
-  const showHero = !q && view === 'home';
+  const showHero = !q && view === 'home' && !narrowed;
 
   return (
     <div
@@ -803,6 +895,134 @@ export function Browse({
             <button className="nav-search-clear" onClick={() => setQuery('')} aria-label="Clear">
               ×
             </button>
+          )}
+        </div>
+
+        <div className="nav-filter">
+          <button
+            className={`filter-toggle${filterOpen ? ' open' : ''}${narrowed ? ' on' : ''}`}
+            onClick={() => setFilterOpen((v) => !v)}
+            aria-expanded={filterOpen}
+            aria-label="Sort and filter"
+          >
+            {/* Drawn, never typed — a glyph sits on a text baseline rather than in the
+                middle of its button. See CLAUDE.md §Buttons. */}
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <g stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none">
+                <path d="M4 7h7M15 7h5M4 12h11M19 12h1M4 17h3M11 17h9" />
+                <circle cx="13" cy="7" r="2" />
+                <circle cx="17" cy="12" r="2" />
+                <circle cx="9" cy="17" r="2" />
+              </g>
+            </svg>
+            <span>Filters</span>
+            {filterCount > 0 && <span className="filter-badge">{filterCount}</span>}
+          </button>
+
+          {filterOpen && (
+            <>
+              {/* Closes on a click anywhere else. Behind the panel, so the panel's own
+                  controls are still reachable. */}
+              <div className="filter-backdrop" onClick={() => setFilterOpen(false)} />
+              <div className="filter-panel" role="dialog" aria-label="Sort and filter">
+                <section>
+                  <h3>Sort by</h3>
+                  <div className="filter-sorts">
+                    {SORTS.map((s) => (
+                      <button
+                        key={s.key}
+                        className={sort === s.key ? 'on' : ''}
+                        onClick={() => setSort(s.key)}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {available.genres.length > 0 && (
+                  <section>
+                    <h3>Genre</h3>
+                    <div className="filter-pills">
+                      {available.genres.map((g) => (
+                        <button
+                          key={g}
+                          className={filters.genres.includes(g) ? 'on' : ''}
+                          onClick={() =>
+                            setFilters((f) => ({ ...f, genres: toggleValue(f.genres, g) }))
+                          }
+                        >
+                          {g}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {(available.resolutions.length > 0 || available.hdr) && (
+                  <section>
+                    <h3>Quality</h3>
+                    <div className="filter-pills">
+                      {available.resolutions.map((r) => (
+                        <button
+                          key={r}
+                          className={filters.resolutions.includes(r) ? 'on' : ''}
+                          onClick={() =>
+                            setFilters((f) => ({
+                              ...f,
+                              resolutions: toggleValue(f.resolutions, r),
+                            }))
+                          }
+                        >
+                          {r === '2160p' ? '4K' : r}
+                        </button>
+                      ))}
+                      {available.hdr && (
+                        <button
+                          className={filters.hdr ? 'on' : ''}
+                          onClick={() => setFilters((f) => ({ ...f, hdr: !f.hdr }))}
+                        >
+                          HDR
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {(available.unwatched || available.availability) && (
+                  <section>
+                    <h3>Show</h3>
+                    <div className="filter-pills">
+                      {available.unwatched && (
+                        <button
+                          className={filters.unwatched ? 'on' : ''}
+                          onClick={() => setFilters((f) => ({ ...f, unwatched: !f.unwatched }))}
+                        >
+                          Unwatched
+                        </button>
+                      )}
+                      {available.availability && (
+                        <button
+                          className={filters.available ? 'on' : ''}
+                          onClick={() => setFilters((f) => ({ ...f, available: !f.available }))}
+                        >
+                          On a connected drive
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                <footer className="filter-foot">
+                  <span>
+                    {result.length} of {base.length}
+                  </span>
+                  <button className="filter-reset" disabled={!narrowed} onClick={resetFilters}>
+                    Reset
+                  </button>
+                </footer>
+              </div>
+            </>
           )}
         </div>
       </header>
@@ -877,6 +1097,7 @@ export function Browse({
             key={row.title}
             title={row.title}
             cards={row.cards}
+            layout={collapsed ? 'grid' : 'row'}
             onHover={(card, rect, el) => setHover({ card, rect, el })}
             onOpen={(card) => {
               setHover(null);
@@ -885,15 +1106,38 @@ export function Browse({
           />
         ))}
 
-        {/* Say what happened and what to do, rather than showing a blank page. */}
-        {q && visibleRows[0].cards.length === 0 && (
+        {/*
+          * Say what happened AND what to do, rather than showing a blank page.
+          *
+          * Which of these it is matters: a search and a filter can both be narrowing at
+          * once, and blaming the search alone for a result the FILTER excluded sends
+          * you off retyping a query that was never the problem.
+          */}
+        {collapsed && visibleRows[0].cards.length === 0 && (
           <p className="browse-empty">
-            Nothing matches “{query.trim()}”.
-          </p>
-        )}
-        {!q && view === 'list' && visibleRows[0].cards.length === 0 && (
-          <p className="browse-empty">
-            Your list is empty. Hover any film and press <strong>+</strong> to save it here.
+            {view === 'list' && base.length === 0 ? (
+              <>
+                Your list is empty. Hover any film and press <strong>+</strong> to save it here.
+              </>
+            ) : q && narrowed ? (
+              <>
+                Nothing matches “{query.trim()}” with these filters.{' '}
+                <button className="link-button" onClick={resetFilters}>
+                  Reset the filters
+                </button>
+                .
+              </>
+            ) : q ? (
+              <>Nothing matches “{query.trim()}”.</>
+            ) : (
+              <>
+                No film matches these filters.{' '}
+                <button className="link-button" onClick={resetFilters}>
+                  Reset them
+                </button>
+                .
+              </>
+            )}
           </p>
         )}
       </div>

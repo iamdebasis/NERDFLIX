@@ -2016,3 +2016,191 @@ body {
 .hover-art > .offline-pill {
   z-index: 5;
 }
+
+/* ------------------------------------------------------------------ *
+ * Sort and filter
+ *
+ * One control in the nav rather than a strip under it: a permanent row of pills
+ * would push the hero down on every launch to serve something used occasionally.
+ * The badge carries what a closed panel cannot say — how many facets are on.
+ * ------------------------------------------------------------------ */
+
+.nav-filter {
+  position: relative;
+  -webkit-app-region: no-drag;
+  flex: none;
+}
+
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: #e5e5e5;
+  font: inherit;
+  font-size: 0.85rem;
+  /* Matches .nav-search's box so the two sit on one baseline. */
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+.filter-toggle:hover { color: #fff; border-color: rgba(255, 255, 255, 0.5); }
+.filter-toggle.open,
+.filter-toggle.on { color: #fff; border-color: #fff; background: rgba(0, 0, 0, 0.75); }
+
+/* Sized by the CONTROL, not per button, so a new icon cannot be born broken. */
+.filter-toggle svg { width: 1rem; height: 1rem; flex: none; }
+
+.filter-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  /* Tabular, or the badge resizes as the count changes. */
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Covers the page so a click anywhere dismisses the panel, but sits BELOW it so the
+ * panel's own pills still take the click.
+ */
+.filter-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.filter-panel {
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  right: 0;
+  z-index: 41;
+  width: 22rem;
+  max-height: min(34rem, calc(100vh - 6rem));
+  overflow-y: auto;
+  padding: 1rem 1.1rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.97);
+  box-shadow: 0 1.5rem 3rem rgba(0, 0, 0, 0.7);
+  animation: filter-in 120ms ease-out;
+}
+
+@keyframes filter-in {
+  from { opacity: 0; transform: translateY(-0.35rem); }
+  to   { opacity: 1; transform: none; }
+}
+
+.filter-panel section { margin-bottom: 1rem; }
+
+.filter-panel h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.filter-sorts { display: grid; gap: 0.25rem; }
+
+.filter-sorts button {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: #cfcfcf;
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.filter-sorts button:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.filter-sorts button.on { background: rgba(255, 255, 255, 0.14); color: #fff; font-weight: 600; }
+
+.filter-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+.filter-pills button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: none;
+  color: #cfcfcf;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.filter-pills button:hover { border-color: rgba(255, 255, 255, 0.5); color: #fff; }
+.filter-pills button.on { background: #fff; border-color: #fff; color: #141414; font-weight: 600; }
+
+.filter-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  font-size: 0.8rem;
+  /* The count changes as pills are pressed; without this the row twitches. */
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-reset {
+  border: 0;
+  background: none;
+  color: #e5e5e5;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.filter-reset:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.filter-reset:disabled { color: var(--muted-dim); cursor: default; }
+
+/* An empty state that offers the way out, rather than just reporting the dead end. */
+.link-button {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #fff;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/*
+ * A result set wraps instead of scrolling sideways.
+ *
+ * `auto-fill` rather than `auto-fit`: with `auto-fit` a two-result grid stretches its
+ * two posters across the whole window, which looks like a rendering fault. `auto-fill`
+ * keeps every poster the same size as it is everywhere else and leaves the empty
+ * columns empty — the size of the answer stays readable.
+ *
+ * Posters come out LARGER here than in a row, because the columns divide the full
+ * width. That is deliberate for a page whose whole content is the result; the 11rem
+ * minimum is the floor that decides the column count, not the final poster size.
+ */
+.row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 1.35rem 0.5rem;
+  padding: 0 3.5rem 1rem;
+}
+
+/* The tile is a flex child in a row and a grid child here; it must not stay fixed. */
+.row-grid .tile {
+  width: 100%;
+}

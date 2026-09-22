@@ -216,6 +216,54 @@ NAME rather than relying on sort stability: the old inline version ordered genre
 count alone, so two equally common genres came out in whatever order the library
 happened to load in.
 
+## Sort and filter
+
+One control in the nav, not a strip beneath it: a permanent row of pills would push the
+hero down on every launch to serve something used occasionally. A closed panel cannot
+say what is on, so the button carries a badge counting active FACETS — not values, or
+picking three genres would read as three filters.
+
+**Narrowing collapses the shelf into one set, exactly as search does**, and for the
+same reason: the same film under "Action", "Science Fiction" and "Recently Added" reads
+as three results. A SORT narrows on its own — asking for the library in title order and
+getting genre rows each internally sorted is not what was asked for.
+
+Search, view and filters COMPOSE rather than override: the view picks the base set,
+search narrows it, filters narrow it again, and only a narrowed set is re-ordered. My
+List keeps the order things were added in and search keeps the library's, which is what
+each of them meant before. The empty state names whichever is responsible — blaming the
+search for a result the FILTER excluded sends you off retyping a query that was never
+the problem.
+
+**A facet is offered only when it SPLITS the library** (`splits` in
+`browse-filter.ts`). One rule behind all of them: a control matching everything, or
+nothing, cannot change what you see, and pressing it while nothing moves looks like a
+bug. On the real library this withholds the whole "Show" section — nothing is watched
+and every drive is connected — which is the rule proving itself rather than a gap.
+
+**A result set is a GRID; a shelf is a row.** Browsing is rows because a shelf is a
+slice of the library and its length is not the point. A result's size IS the point, and
+twelve results in a horizontal strip leave four fifths of the page black. Posters come
+out larger in the grid because the columns divide the full width; that is deliberate.
+`auto-fill`, never `auto-fit` — `auto-fit` stretches a two-result grid across the whole
+window, which reads as a rendering fault.
+
+The grid is the EASIER layout for the hover card, not a risk to it: `.row-scroller` is
+`scroll-snap-type: x proximity` and a scaling `.tile:hover` makes the browser re-snap
+and fire a scroll event with nothing having moved. A grid neither scrolls horizontally
+nor snaps, so that class of flicker cannot arise.
+
+Title order uses the scanner's `sortTitle`, surfaced on the card, so "The Dark Knight
+Rises" files under D rather than T. Known quirk, left alone: scene names spell episodes
+in Roman numerals, so A–Z gives I, II, III, IV, IX, V, VI. Parsing numerals out of a
+filename is exactly the cleverness rule 3 forbids, and release order already exists
+where it matters — the collection row.
+
+Every control in the panel lives inside `.nav`, which is a window drag region, so they
+depend on the blanket `.nav button` no-drag rule. Verify these with a REAL mouse event
+(`Input.dispatchMouseEvent`) — `element.click()` ignores `-webkit-app-region` entirely
+and will pass against a control that is dead to an actual pointer.
+
 ## No required terminal commands
 
 `pnpm install` then `pnpm app` is the entire user-facing surface. Adding a library,

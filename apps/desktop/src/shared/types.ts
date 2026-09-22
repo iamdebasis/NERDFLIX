@@ -35,6 +35,8 @@ export type LibraryCard = {
 export type TitleCard = {
   id: string;
   title: string;
+  /** The scanner's article-stripped form, so "The Dark Knight" files under D. */
+  sortTitle: string;
   year?: number;
   tagline?: string;
   overview: string;
