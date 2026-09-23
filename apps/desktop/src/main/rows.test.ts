@@ -16,7 +16,7 @@ const SW = { id: 10, name: 'Star Wars Collection' };
 const POTC = { id: 295, name: 'Pirates of the Caribbean Collection' };
 
 function card(id: string, over: Partial<RowCard> = {}): RowCard {
-  return { id, title: id, genres: [], year: 2000, addedAt: '2024-01-01T00:00:00Z', ...over };
+  return { id, type: 'movie', title: id, genres: [], year: 2000, addedAt: '2024-01-01T00:00:00Z', ...over };
 }
 
 const EMPTY = { continueIds: [], myListIds: [] };
@@ -139,6 +139,27 @@ describe('row assembly', () => {
     const first = buildRows(cards, EMPTY).map((r) => r.title);
     const second = buildRows([...cards].reverse(), EMPTY).map((r) => r.title);
     assert.deepEqual(first, second);
+  });
+
+  test('shows get their own shelf, newest first, right after Recently Added', () => {
+    const cards = [
+      card('film', { addedAt: '2026-03-01' }),
+      card('wire', { type: 'show', addedAt: '2026-01-01' }),
+      card('chernobyl', { type: 'show', addedAt: '2026-02-01' }),
+    ];
+    const rows = buildRows(cards, EMPTY);
+    assert.deepEqual(rows.map((r) => r.title).slice(0, 2), ['Recently Added', 'TV Shows']);
+    assert.deepEqual(row(rows, 'TV Shows')?.titleIds, ['chernobyl', 'wire']);
+  });
+
+  test('one show is not a shelf', () => {
+    const rows = buildRows([card('film'), card('wire', { type: 'show' })], EMPTY);
+    assert.equal(row(rows, 'TV Shows'), undefined);
+  });
+
+  test('genre rows mix films and shows', () => {
+    const cards = [card('film', { genres: ['Drama'] }), card('wire', { type: 'show', genres: ['Drama'] })];
+    assert.deepEqual(row(buildRows(cards, EMPTY), 'Drama')?.titleIds, ['film', 'wire']);
   });
 
   test('an empty library has no rows', () => {

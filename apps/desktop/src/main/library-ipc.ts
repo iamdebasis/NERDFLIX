@@ -19,7 +19,14 @@
  */
 
 import { ipcMain } from 'electron';
-import { MediaResolver, MetaStore, StateStore, type VolumeState } from '@nfl/core';
+import {
+  episodeLabel,
+  MediaResolver,
+  MetaStore,
+  StateStore,
+  type MediaFile,
+  type VolumeState,
+} from '@nfl/core';
 import {
   DEFAULT_IINA_SOCKET,
   ExternalMpvEngine,
@@ -30,8 +37,9 @@ import {
   readPlaybackStatus,
   type PlaybackStatus,
 } from '@nfl/player';
-import type { PlayOptions, TrackChoice, TrackInfo } from '../shared/types.js';
-import { trackOptionsFor } from './tracks.js';
+import type { PlayOptions, ShowEpisodes, TrackChoice, TrackInfo } from '../shared/types.js';
+import { audioOptions, subtitleOptions, trackOptionsFor, validTracksFor } from './tracks.js';
+import { episodeToPlay, showEpisodes, type ShowContext } from './shows.js';
 
 type Engine = ExternalMpvEngine | IinaEngine;
 let engine: Engine | null = null;
@@ -126,9 +134,37 @@ export function registerPlaybackIpc(deps: Deps): void {
   ipcMain.handle('library:tracks', async (_e, id: string, versionIndex = 0): Promise<TrackInfo> => {
     const title = await deps.store.get(id);
     if (!title) throw new Error('Title not found');
+    if (title.type === 'show') {
+      // The choice is per show; the list comes from the episode Play would start.
+      const pick = episodeToPlay(title, await showContext(id));
+      const file = pick
+        ? new MediaResolver(deps.getStates()).resolveAmong(pick.slot.files)
+        : null;
+      const media = file && file.status !== 'missing' ? file.media : title.media[0];
+      return {
+        audio: audioOptions(media),
+        subtitles: subtitleOptions(media),
+        choice: await deps.state.getTracks(id),
+      };
+    }
     const { audio, subtitles } = trackOptionsFor(title, versionIndex);
     return { audio, subtitles, choice: await deps.state.getTracks(id) };
   });
+
+  /** Seasons and episodes, when a show's detail view opens. */
+  ipcMain.handle('library:episodes', async (_e, id: string): Promise<ShowEpisodes> => {
+    const title = await deps.store.get(id, 'show');
+    if (!title) throw new Error('Show not found');
+    return showEpisodes(title, await showContext(id));
+  });
+
+  async function showContext(id: string): Promise<ShowContext> {
+    return {
+      resolver: new MediaResolver(deps.getStates()),
+      byContent: await deps.state.getEpisodes(),
+      lastContentId: (await deps.state.getProgress(id))?.contentId,
+    };
+  }
 
   ipcMain.handle(
     'library:play',
@@ -152,19 +188,64 @@ export function registerPlaybackIpc(deps: Deps): void {
       if (tracks) await deps.state.setTracks(id, tracks);
       const chosenTracks = tracks ?? (await deps.state.getTracks(id)) ?? undefined;
 
+      /**
+       * Decide WHAT plays — the file, where to start, what to call it, and how to
+       * record progress — once, before either engine is involved. Both engine paths
+       * below then treat a film and an episode identically.
+       */
       const resolver = new MediaResolver(deps.getStates());
-      const availability = resolver.resolve(title, versionIndex);
-      if (availability.status !== 'available') {
-        throw new Error(
-          availability.status === 'offline'
-            ? `${availability.volumeLabel} isn't connected`
-            : 'File not found',
-        );
+      let target: {
+        absolutePath: string;
+        media: MediaFile;
+        startAt?: number;
+        displayTitle: string;
+        record: (pos: number) => void;
+      };
+
+      if (title.type === 'show') {
+        const pick = episodeToPlay(title, await showContext(id), opts.episodeKey);
+        if (!pick) throw new Error('No playable episode');
+        // Only this episode's own copies — never a different episode that is plugged in.
+        const a = resolver.resolveAmong(pick.slot.files);
+        if (a.status !== 'available') {
+          throw new Error(
+            a.status === 'offline' ? `${a.volumeLabel} isn't connected` : 'Episode not found',
+          );
+        }
+        const name = pick.slot.info?.name ?? a.media.episodeTitle;
+        const contentId = a.media.contentId;
+        const duration = a.media.durationSec;
+        target = {
+          absolutePath: a.absolutePath,
+          media: a.media,
+          startAt: fromStart ? undefined : pick.resumeSec,
+          // "Breaking Bad — S1:E4 · Cancer Man", in the OSC and the window title.
+          displayTitle: `${title.title} — ${episodeLabel(pick.slot)}${name ? ` · ${name}` : ''}`,
+          record: (pos) => void deps.state.setEpisodeProgress(id, contentId, pos, duration),
+        };
+      } else {
+        const availability = resolver.resolve(title, versionIndex);
+        if (availability.status !== 'available') {
+          throw new Error(
+            availability.status === 'offline'
+              ? `${availability.volumeLabel} isn't connected`
+              : 'File not found',
+          );
+        }
+        const progress = fromStart ? null : await deps.state.getProgress(id);
+        const duration = availability.media.durationSec;
+        target = {
+          absolutePath: availability.absolutePath,
+          media: availability.media,
+          startAt: progress?.positionSec,
+          displayTitle: `${title.title}${title.year ? ` (${title.year})` : ''}`,
+          record: (pos) => void deps.state.setProgress(id, pos, duration, versionIndex),
+        };
       }
 
-      const progress = fromStart ? null : await deps.state.getProgress(id);
-      const duration = availability.media.durationSec;
-      const displayTitle = `${title.title}${title.year ? ` (${title.year})` : ''}`;
+      const displayTitle = target.displayTitle;
+      // A remembered track this file does not have would mean silent playback.
+      const playTracks = validTracksFor(chosenTracks, target.media);
 
       // A fresh session per film. Reusing one idle instance saves ~250ms of startup
       // but inherits the previous window's fullscreen state and size, which is more
@@ -190,9 +271,9 @@ export function registerPlaybackIpc(deps: Deps): void {
         });
         engine = iina;
         await iina.start();
-        await iina.load(availability.absolutePath, {
-          startAt: progress?.positionSec,
-          ...trackLoadOptions(chosenTracks),
+        await iina.load(target.absolutePath, {
+          startAt: target.startAt,
+          ...trackLoadOptions(playTracks),
         });
         iina.play();
 
@@ -200,14 +281,13 @@ export function registerPlaybackIpc(deps: Deps): void {
         try {
           const status = await readPlaybackStatus(iina, { renderer: 'host' });
           for (const line of formatStatus(status)) console.log(line);
-          warnTrackMismatch(status, chosenTracks);
+          warnTrackMismatch(status, playTracks);
         } catch {
           /* playback still works; only the report is missing */
         }
 
         iina.observe('time-pos', (pos) => {
-          if (pos === null) return;
-          void deps.state.setProgress(id, pos, duration, versionIndex);
+          if (pos !== null) target.record(pos);
         });
 
         return { ok: true };
@@ -278,9 +358,9 @@ export function registerPlaybackIpc(deps: Deps): void {
       });
 
       await engine.start();
-      await engine.load(availability.absolutePath, {
-        startAt: progress?.positionSec,
-        ...trackLoadOptions(chosenTracks),
+      await engine.load(target.absolutePath, {
+        startAt: target.startAt,
+        ...trackLoadOptions(playTracks),
       });
       engine.play();
 
@@ -296,7 +376,7 @@ export function registerPlaybackIpc(deps: Deps): void {
           const status = await readPlaybackStatus(engine!);
           console.log(`\n▶ ${displayTitle}`);
           for (const line of formatStatus(status)) console.log(line);
-          warnTrackMismatch(status, chosenTracks);
+          warnTrackMismatch(status, playTracks);
           // Say WHY the tier was chosen. 'balanced' on a 16-core machine looks like a
           // bug unless it is clear whether that is the content, the hardware, or a
           // measured ceiling from a previous session.
@@ -336,8 +416,7 @@ export function registerPlaybackIpc(deps: Deps): void {
       }, 5000);
 
       engine.observe('time-pos', (pos) => {
-        if (pos === null) return;
-        void deps.state.setProgress(id, pos, duration, versionIndex);
+        if (pos !== null) target.record(pos);
       });
 
       return { ok: true };

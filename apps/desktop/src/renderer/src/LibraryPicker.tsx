@@ -52,6 +52,21 @@ function ScanBar({ done, total }: { done: number; total: number }) {
   );
 }
 
+const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`);
+
+/**
+ * "58 films · 4 shows", or just one of them. A series with forty episodes is one show:
+ * counting its files would call it forty films.
+ */
+function describeCount(card: { titleCount: number; showCount: number }): string {
+  const films = card.titleCount - card.showCount;
+  const parts = [
+    films > 0 ? `${films} ${plural(films, 'film')}` : null,
+    card.showCount > 0 ? `${card.showCount} ${plural(card.showCount, 'show')}` : null,
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
 export function LibraryPicker({
   onPick,
 }: {
@@ -171,7 +186,7 @@ export function LibraryPicker({
           <div>
             <h1 className="headline">Let's find your films.</h1>
             <p className="subhead">
-              Point this at a folder of films — an external drive, a NAS share, anywhere. It
+              Point this at a folder of films or TV — an external drive, a NAS share, anywhere. It
               reads what's there and leaves your files exactly as they are.
             </p>
           </div>
@@ -332,18 +347,14 @@ export function LibraryPicker({
 
               <span className="name">{card.label}</span>
               <span className="meta">
-                {card.titleCount === 0
-                  ? 'Not scanned yet'
-                  : `${card.titleCount} ${card.titleCount === 1 ? 'film' : 'films'} · ${fmtBytes(card.totalBytes)}`}
+                {card.titleCount === 0 ? 'Not scanned yet' : `${describeCount(card)} · ${fmtBytes(card.totalBytes)}`}
               </span>
               {card.combined ? (
                 <>
                   <span className="meta meta-path">{card.path}</span>
                   {card.duplicateCount ? (
                     <span className="meta meta-duplicates">
-                      {card.duplicateCount === 1
-                        ? '1 film on two drives, counted once'
-                        : `${card.duplicateCount} films on two drives, counted once`}
+                      {`${card.duplicateCount} ${card.showCount > 0 ? plural(card.duplicateCount, 'title') : plural(card.duplicateCount, 'film')} on two drives, counted once`}
                     </span>
                   ) : null}
                 </>

@@ -18,6 +18,7 @@ import {
   ingest,
   scanRoot,
   enrichTitle,
+  episodeSlots,
   needsEnrichment,
   loadEnvFiles,
   TmdbClient,
@@ -93,6 +94,7 @@ async function buildCards(): Promise<LibraryCard[]> {
       connected: s.status !== 'offline',
       relocated: s.status === 'relocated',
       titleCount: owned.length,
+      showCount: owned.filter((t) => t.type === 'show').length,
       totalBytes: bytes,
       needsMetadata,
       neverScanned: owned.length === 0,
@@ -120,14 +122,22 @@ async function buildCards(): Promise<LibraryCard[]> {
       t.media.some((m) => new Set(m.sightings.map((sg) => sg.volumeId)).size > 1),
     ).length;
 
-    const bytes = anywhere.reduce(
-      (sum, t) => sum + Math.max(0, ...t.media.map((m) => m.sizeBytes)),
-      0,
-    );
+    /*
+     * The largest copy of each film — and, for a show, of EACH EPISODE. Taking the
+     * largest single file of a show would count one episode and drop the rest.
+     */
+    const distinctBytes = (t: (typeof anywhere)[number]) =>
+      t.type === 'show'
+        ? episodeSlots(t).reduce((s, slot) => s + Math.max(0, ...slot.files.map((m) => m.sizeBytes)), 0)
+        : Math.max(0, ...t.media.map((m) => m.sizeBytes));
+    const bytes = anywhere.reduce((sum, t) => sum + distinctBytes(t), 0);
+    const showCount = anywhere.filter((t) => t.type === 'show').length;
 
     cards.unshift({
       id: ALL_LIBRARIES,
-      label: 'All films',
+      // "All films" would be a wrong promise the moment a library holds a series.
+      label: showCount > 0 ? 'Everything' : 'All films',
+      showCount,
       path: states.map((s) => s.root.label).join(' · '),
       connected: states.some((s) => s.status !== 'offline'),
       titleCount: anywhere.length,

@@ -14,7 +14,7 @@
  */
 
 import type { MediaFile, Title } from '@nfl/core';
-import type { TrackOption } from '../shared/types.js';
+import type { TrackChoice, TrackOption } from '../shared/types.js';
 
 /** mpv's `aid`/`sid` are 1-based within their own type. */
 export const mpvTrackId = (arrayIndex: number): number => arrayIndex + 1;
@@ -143,4 +143,30 @@ export function trackOptionsFor(title: Title, versionIndex = 0): {
 } {
   const media = title.media[versionIndex] ?? title.media[0];
   return { audio: audioOptions(media), subtitles: subtitleOptions(media) };
+}
+
+/**
+ * Drop any remembered track this particular file does not have.
+ *
+ * A show's choice applies to every episode, and episodes are separate files — usually
+ * with identical layouts, but not always. Asking mpv for `aid=3` on a file with two
+ * audio tracks selects NO audio: silent playback in which the device, the channel
+ * counts and everything else read healthy. So an id outside this file's range is
+ * dropped, and the player decides as if nothing had been chosen. Subtitles "off" is
+ * valid for every file.
+ */
+export function validTracksFor(
+  choice: TrackChoice | undefined,
+  media: Pick<MediaFile, 'audio' | 'subtitles'>,
+): TrackChoice | undefined {
+  if (!choice) return undefined;
+  const out: TrackChoice = {};
+  if (choice.audio !== undefined && choice.audio <= (media.audio?.length ?? 0)) {
+    out.audio = choice.audio;
+  }
+  if (choice.subtitle === 'no') out.subtitle = 'no';
+  else if (choice.subtitle !== undefined && choice.subtitle <= (media.subtitles?.length ?? 0)) {
+    out.subtitle = choice.subtitle;
+  }
+  return out.audio === undefined && out.subtitle === undefined ? undefined : out;
 }

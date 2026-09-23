@@ -4,6 +4,7 @@ import type {
   LibraryApi,
   LibraryCard,
   PlaybackApi,
+  ShowEpisodes,
   TrackInfo,
 } from '../shared/types.js';
 
@@ -45,6 +46,8 @@ const playback: PlaybackApi = {
   stop: () => ipcRenderer.invoke('library:stop') as Promise<void>,
   tracks: (titleId, versionIndex) =>
     ipcRenderer.invoke('library:tracks', titleId, versionIndex) as Promise<TrackInfo>,
+  episodes: (titleId) =>
+    ipcRenderer.invoke('library:episodes', titleId) as Promise<ShowEpisodes>,
 };
 
 contextBridge.exposeInMainWorld('libraries', api);

@@ -8,11 +8,13 @@
  */
 
 import { net, protocol } from 'electron';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   MediaResolver,
   SIDECAR_DIR,
+  episodeSlots,
+  type MediaFile,
   type MetaStore,
   type StateStore,
   type Title,
@@ -20,6 +22,7 @@ import {
 } from '@nfl/core';
 import type { BrowseData, TitleCard } from '../shared/types.js';
 import { buildRows } from './rows.js';
+import { hdrLabel, showSummary } from './shows.js';
 
 /** titleId → absolute path on disk, rebuilt whenever the library is read. */
 const artworkIndex = new Map<string, string>();
@@ -63,8 +66,8 @@ function artUrl(titleId: string, file: string, exists: boolean): string | null {
   return exists ? `media://art/${titleId}/${file}` : null;
 }
 
-function describeAudio(title: Title): string | null {
-  const track = title.media[0]?.audio?.[0];
+function describeAudio(media: MediaFile | null | undefined): string | null {
+  const track = media?.audio?.[0];
   if (!track) return null;
   const channels = track.channels === 8 ? '7.1' : track.channels === 6 ? '5.1' : `${track.channels}ch`;
   // macOS cannot bitstream object audio, so say what will actually come out.
@@ -80,8 +83,16 @@ export async function buildBrowseData(
   const { titles } = await store.loadAll();
   const resolver = new MediaResolver(states);
   const myList = await state.getMyList();
-  const progress = await state.continueWatching(50);
-  const progressById = new Map(progress.map((p) => [p.titleId, p.progress]));
+  /*
+   * Every title's latest progress, watched or not. This used to come from
+   * `continueWatching()`, which drops watched titles before anything sees them — so
+   * every card said `watched: false`, and the Unwatched filter could never split the
+   * library. It is also what a show needs: finishing episode 4 is exactly when it
+   * should be offering episode 5.
+   */
+  const recent = await state.recentProgress(5000);
+  const lastById = new Map(recent.map((r) => [r.titleId, r.progress]));
+  const byContent = await state.getEpisodes();
 
   artworkIndex.clear();
 
@@ -98,16 +109,22 @@ export async function buildBrowseData(
     const vol = states.find((s) => s.root.id === media?.sightings[0]?.volumeId);
     let base: string | null = null;
     const poster = t.artwork.poster;
+    // A show's episode stills are served from the same folder as its poster — and from
+    // the stills' own folder when TMDB had no poster to download.
+    const firstStill = t.episodeInfo.find((i) => i.still)?.still;
     if (poster?.startsWith(SIDECAR_DIR) && vol?.resolvedPath) {
       base = join(vol.resolvedPath, SIDECAR_DIR, 'artwork', t.id);
     } else if (poster) {
       base = join(poster, '..');
+    } else if (firstStill) {
+      base = dirname(firstStill);
     }
     if (base) artworkIndex.set(t.id, base);
 
-    const resume = progressById.get(t.id);
+    const last = lastById.get(t.id);
+    const inProgress = last && !last.watched && last.positionSec > 0 ? last : undefined;
 
-    return {
+    const common = {
       id: t.id,
       title: t.title,
       sortTitle: t.sortTitle,
@@ -126,28 +143,84 @@ export async function buildBrowseData(
       poster: artUrl(t.id, 'poster.jpg', Boolean(t.artwork.poster)),
       backdrop: artUrl(t.id, 'backdrop.jpg', Boolean(t.artwork.backdrop)),
       logo: artUrl(t.id, 'logo.png', Boolean(t.artwork.logo)),
+      inMyList: myList.includes(t.id),
+    };
+
+    if (t.type === 'show') {
+      /*
+       * A show's tile describes the episode Play would start — its resolution, HDR,
+       * audio, reachability and progress — because that is what pressing it delivers.
+       * Decided by the same `nextUp` that `library:play` uses, so they cannot disagree.
+       */
+      const { summary, playable } = showSummary(t, {
+        resolver,
+        byContent,
+        lastContentId: last?.contentId,
+      });
+      const next = summary.nextUp;
+      // Distinct content: the largest copy of each episode, never a copy counted twice.
+      const sizeBytes = episodeSlots(t).reduce(
+        (sum, slot) => sum + Math.max(...slot.files.map((f) => f.sizeBytes)),
+        0,
+      );
+      return {
+        ...common,
+        type: 'show' as const,
+        show: summary,
+        resolution: playable?.resolution ?? '',
+        hdr: hdrLabel(playable),
+        audio: describeAudio(playable),
+        sizeBytes,
+        bitrateMbps: playable?.bitrateMbps ?? 0,
+        available: next?.available ?? false,
+        offlineOn: next?.offlineOn ?? null,
+        editions: [],
+        resumeSec: null,
+        resumePct: next?.resumePct ?? null,
+        // "Watched" for a show means every episode, which is when next-up starts over.
+        watched: next?.reason === 'rewatch',
+      };
+    }
+
+    return {
+      ...common,
+      type: 'movie' as const,
       resolution: media?.resolution ?? '',
-      hdr: media?.hdr === 'DV' && media.dvProfile ? `DV P${media.dvProfile}` : (media?.hdr ?? 'SDR'),
-      audio: describeAudio(t),
+      hdr: hdrLabel(media),
+      audio: describeAudio(media),
       sizeBytes: media?.sizeBytes ?? 0,
       bitrateMbps: media?.bitrateMbps ?? 0,
       available: availability.status === 'available',
       offlineOn: availability.status === 'offline' ? availability.volumeLabel : null,
       editions: t.media.map((m) => m.edition ?? 'Standard'),
-      resumeSec: resume?.positionSec ?? null,
+      resumeSec: inProgress?.positionSec ?? null,
       resumePct:
-        resume && resume.durationSec > 0
-          ? Math.min(100, Math.max(0, (resume.positionSec / resume.durationSec) * 100))
+        inProgress && inProgress.durationSec > 0
+          ? Math.min(100, Math.max(0, (inProgress.positionSec / inProgress.durationSec) * 100))
           : null,
-      watched: resume?.watched ?? false,
-      inMyList: myList.includes(t.id),
+      watched: last?.watched ?? false,
     };
   });
 
-  const rows = buildRows(cards, {
-    continueIds: progress.map((p) => p.titleId),
-    myListIds: myList,
-  });
+  /*
+   * Continue Watching, most recent first: a film part-way through, or a show with an
+   * episode to resume or one waiting after the last. A show watched to the end is
+   * finished, and does not belong here.
+   */
+  const cardById = new Map(cards.map((c) => [c.id, c]));
+  const continueIds = recent
+    .filter((r) => {
+      const card = cardById.get(r.titleId);
+      if (!card) return false;
+      if (card.type === 'show') {
+        const reason = card.show?.nextUp?.reason;
+        return reason === 'resume' || reason === 'next';
+      }
+      return !r.progress.watched && r.progress.positionSec > 0;
+    })
+    .map((r) => r.titleId);
+
+  const rows = buildRows(cards, { continueIds, myListIds: myList });
 
   // The hero wants a backdrop and, ideally, a logo to lay over it.
   const hero =

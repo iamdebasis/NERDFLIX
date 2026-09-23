@@ -17,7 +17,10 @@ export const MIN_ROW = 2;
 export type Row = { title: string; titleIds: string[] };
 
 /** Everything row assembly reads. Narrow on purpose, so the tests can be small. */
-export type RowCard = Pick<TitleCard, 'id' | 'title' | 'genres' | 'collection' | 'year' | 'addedAt'>;
+export type RowCard = Pick<
+  TitleCard,
+  'id' | 'type' | 'title' | 'genres' | 'collection' | 'year' | 'addedAt'
+>;
 
 export type RowContext = {
   /** Most recently watched first — the store's order, not ours to re-sort. */
@@ -48,6 +51,15 @@ export function buildRows(cards: readonly RowCard[], ctx: RowContext): Row[] {
 
   const recent = [...cards].sort((a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? ''));
   if (recent.length) rows.push({ title: 'Recently Added', titleIds: recent.map((c) => c.id) });
+
+  /*
+   * Shows get a shelf of their own near the top. In a library that is mostly films, a
+   * handful of series would otherwise only appear scattered through the genre rows,
+   * and nothing on the page would say the library holds TV at all. Genre rows still
+   * mix both, the way Netflix's do.
+   */
+  const shows = recent.filter((c) => c.type === 'show');
+  if (shows.length >= MIN_ROW) rows.push({ title: 'TV Shows', titleIds: shows.map((c) => c.id) });
 
   // Franchises sit above genres: "Star Wars Collection" says more about a shelf than
   // "Science Fiction" does. TMDB's name is used verbatim — it is the one people know.

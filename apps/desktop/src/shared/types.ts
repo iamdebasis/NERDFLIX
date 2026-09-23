@@ -27,6 +27,8 @@ export type LibraryCard = {
 
   relocated: boolean;
   titleCount: number;
+  /** How many of `titleCount` are shows — so a 40-episode series is "1 show", not 40 films. */
+  showCount: number;
   totalBytes: number;
   needsMetadata: number;
   availableCount: number;
@@ -46,8 +48,35 @@ export type TrackOption = {
   isCommentary: boolean;
 };
 
+/** Which episode Play means for a show, already decided by the main process. */
+export type NextUpCard = {
+  /** Slot key, `"1:4"` — what `play({ episodeKey })` takes back. */
+  key: string;
+  /** `S1:E4` — Netflix's short form. */
+  label: string;
+  name?: string;
+  reason: 'resume' | 'next' | 'start' | 'rewatch';
+  resumePct: number | null;
+  available: boolean;
+  offlineOn: string | null;
+};
+
+/** Show-only facts for tiles, the hover card and the billboard. */
+export type ShowSummary = {
+  seasonCount: number;
+  episodeCount: number;
+  creators: string[];
+  /** "2008–2013" for an ended show; just the first year while it is running. */
+  yearLabel?: string;
+  /** Null only for a show with no playable episode numbering. */
+  nextUp: NextUpCard | null;
+};
+
 export type TitleCard = {
   id: string;
+  type: 'movie' | 'show';
+  /** Present exactly when `type === 'show'`. */
+  show?: ShowSummary;
   title: string;
   /** The scanner's article-stripped form, so "The Dark Knight" files under D. */
   sortTitle: string;
@@ -151,6 +180,49 @@ export type LibraryApi = {
   toggleMyList(titleId: string): Promise<boolean>;
 };
 
+/** One episode row in a show's detail view. */
+export type EpisodeRow = {
+  key: string;
+  season: number;
+  episode: number;
+  episodeEnd?: number;
+  /** `S1:E4` */
+  label: string;
+  /** "4", or "1–2" for a double episode — the big number in the list. */
+  number: string;
+  /** TMDB's name, else the filename's, else "Episode 4". Never empty. */
+  name: string;
+  overview?: string;
+  runtimeMinutes?: number;
+  airDate?: string;
+  /** media:// URL of the still, or null when TMDB has none. */
+  still: string | null;
+  available: boolean;
+  offlineOn: string | null;
+  resumePct: number | null;
+  watched: boolean;
+  resolution: string;
+  hdr: string;
+};
+
+export type SeasonRow = {
+  season: number;
+  /** "Season 1", "Miniseries", "Specials" — TMDB's name when there is one. */
+  name: string;
+  /** Episodes on your drives. */
+  owned: number;
+  /** Episodes TMDB lists, when known — for "8 of 10 episodes". */
+  total?: number;
+  airYear?: number;
+};
+
+export type ShowEpisodes = {
+  seasons: SeasonRow[];
+  episodes: EpisodeRow[];
+  /** The slot key Play means right now, so the list can open on its season. */
+  nextUpKey: string | null;
+};
+
 /** mpv ids, or `'no'` for subtitles off. Absent means "let the player decide". */
 export type TrackChoice = { audio?: number; subtitle?: number | 'no' };
 
@@ -163,6 +235,12 @@ export type TrackInfo = {
 
 export type PlayOptions = {
   versionIndex?: number;
+  /**
+   * Shows only: which episode, as a slot key (`"1:4"`). Omitted means next-up. A slot
+   * rather than a file, because one episode can exist in several copies and the main
+   * process picks the best reachable one — of THAT episode, never another.
+   */
+  episodeKey?: string;
   fromStart?: boolean;
   /**
    * Passed to the player only for the fields actually set. Sending nothing lets mpv
@@ -181,4 +259,6 @@ export type PlaybackApi = {
    * whole disc's track table for every film in the library.
    */
   tracks(titleId: string, versionIndex?: number): Promise<TrackInfo>;
+  /** A show's seasons and episodes, fetched when its detail view opens. */
+  episodes(titleId: string): Promise<ShowEpisodes>;
 };
