@@ -46,10 +46,21 @@ export class MediaResolver {
       }
     }
 
+    return this.resolveAmong(title.media);
+  }
+
+  /**
+   * The best copy among files that are the SAME thing — a film's editions, or one
+   * episode's versions. Never pass a whole show's media here: "the highest-bitrate
+   * reachable file" of a show is simply some other episode.
+   */
+  resolveAmong(files: readonly MediaFile[]): Availability {
+    if (files.length === 0) return { status: 'missing' };
+
     const playable: Availability[] = [];
     const offline: Availability[] = [];
 
-    for (const media of title.media) {
+    for (const media of files) {
       const found = this.locate(media);
       if (found) {
         playable.push(found);
@@ -71,6 +82,17 @@ export class MediaResolver {
     }
 
     return offline[0] ?? { status: 'missing' };
+  }
+
+  /**
+   * Exactly this file, or where it is — never a substitute.
+   *
+   * `resolve()` falls back to the best reachable file in the title, which is right for
+   * a film's editions and a silent wrong-episode bug for a show: asking for S1E4 while
+   * its drive is unplugged would play whichever episode had the highest bitrate.
+   */
+  resolveMedia(media: MediaFile): Availability {
+    return this.resolveAmong([media]);
   }
 
   /** The first sighting of this file on a drive that is attached right now. */

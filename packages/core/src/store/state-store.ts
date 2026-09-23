@@ -11,6 +11,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
   StateFileSchema,
+  type EpisodeProgress,
   type Progress,
   type StateFile,
   type TrackChoice,
@@ -92,6 +93,78 @@ export class StateStore {
       };
     }
     await this.queueWrite();
+  }
+
+  /** Every episode resume point, keyed by contentId. */
+  async getEpisodes(): Promise<Record<string, EpisodeProgress>> {
+    return (await this.load()).episodes;
+  }
+
+  /**
+   * Record where you are in an episode, and make it the show's latest.
+   *
+   * Same thresholds as `setProgress`, with one difference that matters for TV. Sampling
+   * the first minute of episode 5 discards THAT episode's start — but it must not
+   * touch the show's record, or "you finished episode 4" is forgotten and Continue
+   * Watching loses its place.
+   */
+  async setEpisodeProgress(
+    showId: string,
+    contentId: string,
+    positionSec: number,
+    durationSec: number,
+  ): Promise<void> {
+    const s = await this.load();
+    const now = new Date().toISOString();
+    const existing = s.episodes[contentId];
+    const nearEnd = durationSec > 0 && positionSec / durationSec > 0.97;
+    const barelyStarted = positionSec < 120;
+
+    if (nearEnd) {
+      s.episodes[contentId] = { positionSec: 0, durationSec, watched: true, lastPlayedAt: now };
+      s.progress[showId] = {
+        contentId,
+        mediaIndex: 0,
+        positionSec: 0,
+        durationSec,
+        watched: true,
+        lastPlayedAt: now,
+      };
+    } else if (barelyStarted) {
+      // A rewatch abandoned early is still a watched episode.
+      if (existing && !existing.watched) delete s.episodes[contentId];
+    } else {
+      s.episodes[contentId] = {
+        positionSec,
+        durationSec,
+        watched: existing?.watched ?? false,
+        lastPlayedAt: now,
+      };
+      s.progress[showId] = {
+        contentId,
+        mediaIndex: 0,
+        positionSec,
+        durationSec,
+        watched: false,
+        lastPlayedAt: now,
+      };
+    }
+    await this.queueWrite();
+  }
+
+  /**
+   * Every title's latest progress, watched or not, most recent first.
+   *
+   * `continueWatching` drops anything finished, which is right for a film and wrong
+   * for a show: finishing episode 4 is exactly when episode 5 should be waiting.
+   * Browse decides what each entry means; this only reports what happened.
+   */
+  async recentProgress(limit = 50): Promise<Array<{ titleId: string; progress: Progress }>> {
+    const s = await this.load();
+    return Object.entries(s.progress)
+      .sort((a, b) => b[1].lastPlayedAt.localeCompare(a[1].lastPlayedAt))
+      .slice(0, limit)
+      .map(([titleId, progress]) => ({ titleId, progress }));
   }
 
   /** Continue Watching, most recent first. */
