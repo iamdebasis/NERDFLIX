@@ -54,6 +54,69 @@ export type TmdbMovie = {
   external_ids?: { imdb_id?: string };
 };
 
+/** A `/search/tv` result. */
+export type TmdbShowCandidate = {
+  id: number;
+  name: string;
+  original_name?: string;
+  first_air_date?: string;
+  origin_country?: string[];
+  popularity?: number;
+  vote_count?: number;
+};
+
+type TmdbVideos = {
+  results?: Array<{ key: string; site: string; type: string; official?: boolean; published_at?: string }>;
+};
+
+export type TmdbShow = {
+  id: number;
+  name: string;
+  original_name?: string;
+  first_air_date?: string;
+  last_air_date?: string;
+  /** 'Returning Series' | 'Ended' | 'Canceled' | 'In Production' … */
+  status?: string;
+  tagline?: string;
+  overview?: string;
+  genres?: Array<{ id: number; name: string }>;
+  origin_country?: string[];
+  created_by?: Array<{ name: string }>;
+  networks?: Array<{ name: string }>;
+  seasons?: Array<{
+    season_number: number;
+    name: string;
+    overview?: string;
+    air_date?: string | null;
+    episode_count?: number;
+  }>;
+  /** Series-wide cast. `credits` alone is only the latest season's. */
+  aggregate_credits?: {
+    cast?: Array<{ name: string; order: number; roles?: Array<{ character?: string }> }>;
+  };
+  credits?: { cast?: Array<{ name: string; character?: string; order: number }> };
+  videos?: TmdbVideos;
+  images?: { posters?: TmdbImage[]; backdrops?: TmdbImage[]; logos?: TmdbImage[] };
+  content_ratings?: { results?: Array<{ iso_3166_1: string; rating?: string }> };
+  external_ids?: { imdb_id?: string };
+};
+
+export type TmdbSeason = {
+  season_number: number;
+  name: string;
+  overview?: string;
+  air_date?: string | null;
+  episodes?: Array<{
+    season_number: number;
+    episode_number: number;
+    name: string;
+    overview?: string;
+    air_date?: string | null;
+    runtime?: number | null;
+    still_path?: string | null;
+  }>;
+};
+
 export class TmdbError extends Error {}
 
 export class TmdbClient {
@@ -115,6 +178,62 @@ export class TmdbClient {
     });
     await this.writeCache(id, data);
     return data;
+  }
+
+  // --- TV -----------------------------------------------------------------------
+
+  async searchTv(query: string, year?: number): Promise<TmdbShowCandidate[]> {
+    const params: Record<string, string> = { query, include_adult: 'false' };
+    if (year) params.first_air_date_year = String(year);
+    const data = await this.request<{ results?: TmdbShowCandidate[] }>('/search/tv', params);
+    return data.results ?? [];
+  }
+
+  /**
+   * Everything about a series in one request, cached verbatim like films.
+   *
+   * The cache lives under `tmdb/tv/`, NOT beside the film responses. TMDB's film and TV
+   * ids are separate number spaces — tv/1396 is Breaking Bad and movie/1396 is not —
+   * so one shared folder would serve a film's response as a show's, or the reverse.
+   */
+  async tvDetails(id: number): Promise<TmdbShow> {
+    const rel = join('tv', `${id}.json`);
+    const cached = await this.readJson<TmdbShow>(rel);
+    if (cached) return cached;
+    const data = await this.request<TmdbShow>(`/tv/${id}`, {
+      append_to_response: 'aggregate_credits,credits,videos,images,content_ratings,external_ids',
+      include_image_language: 'en,null',
+    });
+    await this.writeJson(rel, data);
+    return data;
+  }
+
+  /** One season's episodes. Only ever asked for seasons the library holds. */
+  async tvSeason(id: number, season: number): Promise<TmdbSeason> {
+    const rel = join('tv', `${id}-s${season}.json`);
+    const cached = await this.readJson<TmdbSeason>(rel);
+    if (cached) return cached;
+    const data = await this.request<TmdbSeason>(`/tv/${id}/season/${season}`);
+    await this.writeJson(rel, data);
+    return data;
+  }
+
+  private async readJson<T>(rel: string): Promise<T | null> {
+    try {
+      return JSON.parse(await readFile(join(this.cacheDir, 'tmdb', rel), 'utf8')) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeJson(rel: string, data: unknown): Promise<void> {
+    try {
+      const p = join(this.cacheDir, 'tmdb', rel);
+      await mkdir(dirname(p), { recursive: true });
+      await writeFile(p, JSON.stringify(data, null, 2));
+    } catch {
+      // Cache is an optimisation, never a requirement.
+    }
   }
 
   private cachePath(id: number): string {

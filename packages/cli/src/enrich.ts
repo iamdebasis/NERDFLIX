@@ -31,6 +31,7 @@ function icon(status: EnrichOutcome['status']): string {
   switch (status) {
     case 'matched': return `${C.green}✓${C.reset}`;
     case 'rederived': return `${C.green}↻${C.reset}`;
+    case 'refreshed': return `${C.green}↻${C.reset}`;
     case 'review': return `${C.yellow}?${C.reset}`;
     case 'not-found': return `${C.red}✕${C.reset}`;
     case 'failed': return `${C.red}!${C.reset}`;
@@ -117,6 +118,7 @@ async function main() {
   const count = (s: EnrichOutcome['status']) => outcomes.filter((o) => o.status === s).length;
   console.log(`\n${C.bold}Done${C.reset}`);
   console.log(`  ${C.green}${count('matched')}${C.reset} matched`);
+  if (count('refreshed')) console.log(`  ${C.green}${count('refreshed')}${C.reset} shows brought up to date ${C.dim}(new seasons or episodes)${C.reset}`);
   if (count('rederived')) console.log(`  ${C.green}${count('rederived')}${C.reset} re-derived from cache ${C.dim}(no network)${C.reset}`);
   if (count('review')) console.log(`  ${C.yellow}${count('review')}${C.reset} need review — ${C.dim}pnpm library --review${C.reset}`);
   if (count('not-found')) console.log(`  ${C.red}${count('not-found')}${C.reset} not found on TMDB`);

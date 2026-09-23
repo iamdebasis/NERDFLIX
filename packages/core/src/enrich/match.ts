@@ -7,6 +7,7 @@
  */
 
 import type { ParsedRelease } from '../scan/parse.js';
+import type { TmdbShowCandidate } from './tmdb.js';
 
 export type TmdbCandidate = {
   id: number;
@@ -175,4 +176,111 @@ export function decide(scores: MatchScore[]): MatchDecision {
     runnersUp: sorted.slice(1, 4),
     verdict: confident ? 'auto' : 'review',
   };
+}
+
+// --- TV ------------------------------------------------------------------------
+
+
+export type ShowQuery = {
+  series: string;
+  year?: number;
+  /** TMDB origin_country code, from a scene suffix like `The.Office.US`. */
+  country?: string;
+  searchTitles?: readonly string[];
+};
+
+export type ShowScore = {
+  candidate: TmdbShowCandidate;
+  score: number;
+  reasons: string[];
+  titleScore: number;
+  yearScore: number;
+  /** null when the file gave no country to compare against. */
+  countryMatch: boolean | null;
+};
+
+function firstAirYear(c: TmdbShowCandidate): number | undefined {
+  const y = Number((c.first_air_date ?? '').slice(0, 4));
+  return Number.isFinite(y) && y > 1880 ? y : undefined;
+}
+
+export function scoreShowCandidate(q: ShowQuery, candidate: TmdbShowCandidate): ShowScore {
+  const reasons: string[] = [];
+  const names = [candidate.name, candidate.original_name].filter(Boolean) as string[];
+  const probes = q.searchTitles?.length ? q.searchTitles : [q.series];
+
+  let titleScore = 0;
+  for (const p of probes) for (const n of names) titleScore = Math.max(titleScore, titleSimilarity(p, n));
+  if (titleScore >= 0.95) reasons.push('name matches');
+  else if (titleScore >= 0.8) reasons.push('name close');
+  else reasons.push('name differs');
+
+  let yearScore = 0.5; // unknown is neutral — most episode names carry no year
+  const cYear = firstAirYear(candidate);
+  if (q.year && cYear) {
+    const delta = Math.abs(q.year - cYear);
+    yearScore = delta === 0 ? 1 : delta === 1 ? 0.8 : 0;
+    reasons.push(delta === 0 ? 'first aired that year' : `first aired ${delta} year(s) apart`);
+  }
+
+  let countryMatch: boolean | null = null;
+  if (q.country) {
+    countryMatch = (candidate.origin_country ?? []).includes(q.country);
+    reasons.push(countryMatch ? `made in ${q.country}` : `not from ${q.country}`);
+  }
+
+  let score = titleScore * 0.6 + yearScore * 0.4;
+  if (countryMatch === true) score = Math.min(1, score + 0.1);
+  if (countryMatch === false) score *= 0.5;
+
+  return { candidate, score, reasons, titleScore, yearScore, countryMatch };
+}
+
+export type ShowDecision = {
+  best: ShowScore | null;
+  runnersUp: ShowScore[];
+  verdict: 'auto' | 'review' | 'none';
+};
+
+/**
+ * Auto-accept a show only when nothing else could be it.
+ *
+ * Films require the year to agree, but most episode names carry no year, so that rule
+ * would send every show to review. The TV rule instead asks whether the NAME is
+ * ambiguous: "Breaking Bad" names one series and is safe; "The Office" names at least
+ * three (US, UK, and others) and is not — unless the file's year or country rules the
+ * others out. Popularity is never the tie-breaker: that is precisely how a wrong match
+ * gets applied silently, and a wrong show is worse than a flagged one because nobody
+ * finds out.
+ */
+export function decideShow(scores: ShowScore[]): ShowDecision {
+  if (scores.length === 0) return { best: null, runnersUp: [], verdict: 'none' };
+
+  const sorted = [...scores].sort((a, b) => b.score - a.score);
+  const best = sorted[0];
+  const others = sorted.slice(1);
+
+  /*
+   * Near-exact names only. The film matcher scores a prefix match 0.9, because a release
+   * often keeps a subtitle TMDB drops — but TV spin-offs share prefixes ("Star Wars" /
+   * "Star Wars: The Clone Wars"), so for a show a prefix match is neither enough to
+   * accept nor enough to count as a rival to an exact one.
+   */
+  const NEAR_EXACT = 0.95;
+
+  // A rival is another show with the same name that the file does not rule out.
+  const rivals = others.filter(
+    (o) =>
+      o.titleScore >= NEAR_EXACT &&
+      o.countryMatch !== false &&
+      (best.yearScore < 1 || o.yearScore >= 0.8),
+  );
+
+  const confident =
+    best.titleScore >= NEAR_EXACT &&
+    best.countryMatch !== false &&
+    best.yearScore !== 0 &&
+    rivals.length === 0;
+
+  return { best, runnersUp: others.slice(0, 3), verdict: confident ? 'auto' : 'review' };
 }
