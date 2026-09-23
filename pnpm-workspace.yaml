@@ -8,4 +8,9 @@ allowBuilds:
   esbuild: false
   # Electron's postinstall downloads the actual runtime. Without this there is no app.
   electron: true
-  electron-winstaller: set this to true or false
+  # Windows-only, pulled in transitively by electron-builder. We ship macOS only, so
+  # its build script is never wanted — but the DECISION has to be recorded. pnpm 10+
+  # fails the whole install on an unapproved build script (ERR_PNPM_IGNORED_BUILDS),
+  # so an unanswered entry here breaks every fresh clone while an existing
+  # node_modules keeps working — which is why it survived this long.
+  electron-winstaller: false
