@@ -2,7 +2,7 @@
 
 **Status:** Locked
 **Target:** macOS 14+, Apple Silicon (any generation), single user, offline-capable
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-23 (TV shows, §5, §7.2–7.4)
 
 This document is the source of truth for architectural decisions. It is written to be read
 by both humans and coding agents. If an implementation disagrees with this document, the
@@ -39,6 +39,11 @@ document wins until it is explicitly amended.
 - **Fully native SwiftUI + libmpv.** Best-engineered option in the abstract. Rejected on
   velocity: slower iteration on a UI that will be tweaked hundreds of times, and a second
   language to maintain alongside the metadata CLI.
+- **A filename parser's TV mode for episode numbering.** `@ctrl/video-filename-parser`
+  with TV parsing on reads `Star.Wars.Episode.4.A.New.Hope.1977` as episode 4 of a show
+  called *Star Wars*, a `Season 01` folder as a show called *Season*, misses `S08E01E02`,
+  and drops the series year. A film misread as an episode vanishes from the film
+  shelves, so numbering has a strict hand-written gate instead. See §7.3.
 - **mpv `--wid` window embedding on macOS.** Documented as unreliable inside Electron on
   this platform — can produce audio with a black video surface. Use the render API path
   when embedding, or the two-window overlay before that.
@@ -172,7 +177,7 @@ regenerable. Deleting `index.sqlite` or `cache/` must never lose user data. Rege
 
 ## 5. Data model
 
-### 5.1 Title record — `db/movies/<slug>.json`
+### 5.1 Title record — `db/movies/<slug>.json`, `db/shows/show-<slug>.json`
 
 ```ts
 const Title = z.object({
@@ -216,6 +221,22 @@ const Title = z.object({
 });
 ```
 
+**Shows are Titles too**, with `type: 'show'` and every episode file in `media[]`. The
+id is prefixed `show-` so a series and a film of the same name never collide, and the
+records live in their own directory. Show-only fields:
+
+```ts
+  creators: z.array(z.string()),           // a show's director changes per episode
+  originCountry: z.string().optional(),    // TMDB code; "GB" for a `.UK` release
+  endYear: z.number().optional(),          // set only once TMDB says the show has ended
+  seasonInfo: z.array(SeasonInfo),         // OWNED seasons only: name, airYear, episodeCount
+  episodeInfo: z.array(EpisodeInfo),       // OWNED episodes only: name, overview, runtime, still
+```
+
+`seasonInfo` and `episodeInfo` are keyed by season and episode number, not by file,
+because one episode can exist in several copies. `episodeCount` is TMDB's total, which
+is what lets the UI say "8 of 10 episodes" rather than implying you own the lot.
+
 ### 5.2 Media file
 
 One title may have several. Editions are why.
@@ -253,8 +274,19 @@ const MediaFile = z.object({
   chapters: z.array(z.object({ title: z.string(), startSec: z.number() })),
 
   fingerprint: z.string(),                 // hash(size + mtime) — re-probe trigger
+
+  // Episodes only — from the filename and its folders (§7.3).
+  season: z.number().optional(),           // 0 is Specials
+  episode: z.number().optional(),
+  episodeEnd: z.number().optional(),       // S08E01E02 → episode 1, episodeEnd 2
+  episodeTitle: z.string().optional(),     // fallback only; TMDB's name wins
 });
 ```
+
+Episodes of a show are grouped into **slots** (`library/episodes.ts`): one slot per
+season and episode, holding every copy of it. Playing an episode resolves among THAT
+slot's copies only (`resolveAmong`) — resolving across the whole show would hand back
+whichever episode happened to be on a connected drive, which is a different episode.
 
 ### 5.3 Field authority
 
@@ -263,19 +295,52 @@ Three inputs, no overlap. Do not let them contradict each other.
 | Source | Owns |
 |---|---|
 | **ffprobe** | resolution, codecs, bit depth, HDR type, audio tracks, subtitle tracks, duration, chapters, real bitrate |
-| **Filename** | edition, source (UHD BluRay vs WEB-DL), REMUX vs encode, release group |
-| **TMDB** | canonical title, year, overview, genres, cast, directors, certification, artwork, trailer URL |
+| **Filename** | edition, source (UHD BluRay vs WEB-DL), REMUX vs encode, release group; for TV, series name and season/episode number |
+| **TMDB** | canonical title, year, overview, genres, cast, directors, certification, artwork, trailer URL; for TV, creators, network, season and episode names, synopses, stills |
 
 Never parse HDR or audio from the filename. ffprobe reads the actual stream.
+
+Episode numbering is the one structural fact only the filename can supply: ffprobe
+cannot know which file is S02E05, and TMDB can describe an episode only once we have
+said which one it is. The filename's episode title is kept as a fallback for display
+and never overrides TMDB's.
 
 ### 5.4 User state — `state/progress.json`
 
 Kept separate so regenerating `db/` cannot destroy watch history.
 
 ```ts
-{ [titleId]: { mediaIndex: number, positionSec: number,
-               durationSec: number, watched: boolean, lastPlayedAt: string } }
+{
+  version: 1,
+  progress: { [titleId]: { mediaIndex, positionSec, durationSec, watched, lastPlayedAt,
+                           contentId? } },    // for a show: the episode last touched
+  episodes: { [contentId]: { positionSec, durationSec, watched, lastPlayedAt } },
+  myList: string[],
+  tracks: { [titleId]: { audio?, subtitle? } },
+  thumbs: { [titleId]: 'up' | 'down' },
+}
 ```
+
+Episode progress is keyed by `contentId`, for the same reason media is: renaming or
+moving an episode must not lose your place in it. A show's own `progress` entry names
+the episode last touched, which is what next-up follows — it resumes that episode if
+unfinished, otherwise offers the one after it, and never advances into Specials.
+
+**Nothing may cost the whole file.** mpv reports an unavailable `time-pos` with no
+value as a file unloads; recorded as-is it made the file invalid, and the old loader
+answered an invalid file by starting empty — so the next write saved an empty slate over
+all watch history. Four layers now stand between that and `state/`:
+
+1. The engines pass `null`, never nothing, for a property with no value.
+2. Callers record only a finite number.
+3. The store refuses to write anything that is not a non-negative finite position.
+4. `load()` validates entry by entry, keeps everything valid, preserves the original
+   byte for byte as `progress.json.invalid-<timestamp>` (or `.unparseable-` when it is
+   not JSON at all), and writes the repaired file back so the next launch does not
+   salvage again. Concurrent loads share one read, so two callers can never hold two
+   copies of state and have one copy's writes lost.
+
+`state-safety.test.ts` replays the exact corrupted file observed on a real run.
 
 ---
 
@@ -366,14 +431,48 @@ are canonical and complete, while the file inside is sometimes truncated.
 .DS_Store  ._*  .Spotlight-V100  .fseventsd  .Trashes  .TemporaryItems
 $RECYCLE.BIN  "System Volume Information"  @eaDir
 *.txt  *.nfo  *.sfv  *.srr  *.jpg  *.png
-Sample/  Subs/  Proof/  Screens/  Extras/
+Sample(s)/  Proof/  Screens/  Screenshots/  Extras/  Featurettes/  Subs/  Subtitles/
+Bonus/  "Behind the Scenes"/  "Deleted Scenes"/  Interviews/  Trailers/
 ```
+
+Kept in step with `JUNK_DIRS` in `scan/junk.ts` — `Subs/` was once listed here and not
+there, and a stray video inside it counted as a second feature. Change both together.
+
+A file with an explicit `SxxEyy` marker uses a 20 MB size floor instead of the feature
+floor: a half-hour SDR episode is legitimately far smaller than any film remux.
 
 ### 7.3 Parsing
 
-Use `@ctrl/video-filename-parser` (Radarr-derived). Strip tracker tags like `[TGx]`
-before parsing or they contaminate the release group. Pass `true` as the second argument
-for TV parsing.
+Use `@ctrl/video-filename-parser` (Radarr-derived) for films. Strip tracker tags like
+`[TGx]` before parsing or they contaminate the release group. Do **not** use its TV mode
+(§1, rejected).
+
+Episodes are recognised by `scan/episode.ts`, and only on one of three pieces of
+evidence:
+
+1. An explicit `S01E04` (or `S08E01E02`, `S08E01-E02`) anywhere in the name.
+2. `1x04` — but only with a series name before it, or directly inside a season folder,
+   because `10x10` is also the name of a film.
+3. A name that opens with a number, DIRECTLY inside a folder that names the season
+   (`Season 1/`, `S01/`, `Specials/`). Two levels down is a featurette, not an episode.
+
+Nothing else is an episode. A film misfiled as TV disappears from the film shelves,
+which is worse than an episode left on them. `Star.Wars.Episode.4` and friends are in
+`episode.test.ts` as cases that must stay films.
+
+The series name comes from the file itself first, then from the nearest folder that is
+not a season folder or a generic one (`TV/`, `Shows/`), reading a season-pack folder
+(`Show.S02.2160p.REMUX`) for its series part. A trailing year (`Doctor.Who.2005`) and a
+country suffix (`The.Office.UK` → `GB`) are split off and kept: they are what separate a
+remake from its original.
+
+The folder path relative to the library root is passed to `parseRelease` so this
+context is available; a file that looks like TV but carries no episode number is
+reported as `tv-without-episode` and skipped rather than guessed.
+
+**Grouping into shows is by normalised name, and year and country can only EXCLUDE.**
+A show split in two is visible and fixable; *The Office* (UK) merged into *The Office*
+(US) mixes two shows' episodes into one list and is not.
 
 Scene naming eats punctuation — `Terminator.2.Judgment.Day` must match TMDB's
 *Terminator 2: Judgment Day*. The matcher is punctuation-insensitive.
@@ -386,6 +485,24 @@ when both are strong. Everything else becomes `matchState: 'review'` and surface
 
 **Once `matchState` is `confirmed`, freeze it.** Rescans must never re-match a confirmed
 title.
+
+**Shows** are matched against TMDB's TV search with stricter rules than films:
+
+- The name must be near-exact (≥ 0.95). The film matcher accepts a prefix at 0.9
+  because releases keep subtitles TMDB drops, but TV spin-offs share prefixes (*Star
+  Wars* / *Star Wars: The Clone Wars*), so for a show a prefix is neither enough to
+  accept nor enough to count as a rival.
+- A rival is another near-exact name that the file's year and country do not rule out.
+  Any rival sends the show to review. That is the remake case, and *The Office* with no
+  year or country is genuinely ambiguous.
+- Popularity is never a tie-breaker. The more popular show is not more likely to be
+  the one on your drive.
+
+TV and film ids are separate number spaces at TMDB, so the raw-response cache is
+namespaced (`cache/tmdb/tv/`). A show is re-enriched when new episodes arrive that it has
+no description for, and only owned seasons and episodes are fetched and stored. TV's
+compound genres are split onto the film names ("Sci-Fi & Fantasy" → Science Fiction,
+Fantasy) so a genre row can hold both.
 
 ### 7.5 Caching
 

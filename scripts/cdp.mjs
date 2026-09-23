@@ -136,8 +136,13 @@ export async function attach(port = 9222) {
       await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
     },
 
-    async screenshot({ format = 'jpeg', quality = 88 } = {}) {
-      const msg = await send('Page.captureScreenshot', { format, quality });
+    /** `clip` is in CSS pixels: `{ x, y, width, height }`. */
+    async screenshot({ format = 'jpeg', quality = 88, clip } = {}) {
+      const msg = await send('Page.captureScreenshot', {
+        format,
+        quality,
+        ...(clip ? { clip: { ...clip, scale: 1 } } : {}),
+      });
       return Buffer.from(msg.result.data, 'base64');
     },
 

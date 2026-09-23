@@ -40,9 +40,9 @@ const CHROME_MS = 5200;
 const cdp = await attach(9222);
 let n = 0;
 
-async function shot(file, description) {
+async function shot(file, description, clip) {
   const target = join(OUT, file);
-  await writeFile(target, await cdp.screenshot({ quality: 92 }));
+  await writeFile(target, await cdp.screenshot({ quality: 92, clip }));
   await run('sips', ['--resampleWidth', String(WIDTH), '-s', 'format', 'jpeg',
                      '-s', 'formatOptions', '80', target, '--out', target]);
   const { size } = await (await import('node:fs/promises')).stat(target);
@@ -84,7 +84,8 @@ await assert(`document.querySelectorAll('button.card').length >= 1`, 'no library
 await shot('01-library-picker.jpg', 'drive cards and the combined shelf');
 
 // --- into the library --------------------------------------------------------
-const combined = `[...document.querySelectorAll('button.card')].find(b => b.innerText.includes('All films'))`;
+// "All films", or "Everything" once the library holds a series.
+const combined = `[...document.querySelectorAll('button.card')].find(b => /All films|Everything/.test(b.innerText))`;
 const anyCard = `document.querySelector('button.card')`;
 await cdp.pointer((await cdp.eval(`Boolean(${combined})`)) ? combined : anyCard, { click: true });
 await until(cdp, `Boolean(document.querySelector('.browse'))`);
@@ -215,6 +216,27 @@ await cdp.eval(`
 await wait(CHROME_MS);
 await park();
 await shot('09-track-picker.jpg', 'audio and subtitles, chosen before playing');
+
+// --- 10. a show's episode list — only when the library holds one ------------
+const showTile = `[...document.querySelectorAll('section.row')].find(r => r.querySelector('.row-title').innerText === 'TV Shows')?.querySelector('.tile')`;
+await cdp.eval(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+await wait(700);
+if (await cdp.eval(`Boolean(${showTile})`)) {
+  await cdp.eval(`document.querySelector('.browse').scrollTo({ top: 0 })`);
+  await wait(400);
+  await cdp.eval(`${showTile}.scrollIntoView({ block: 'center' })`);
+  await wait(500);
+  await cdp.pointer(showTile, { click: true });
+  await until(cdp, `document.querySelectorAll('.episode').length > 0`, { timeout: 15000 });
+  await cdp.eval(`document.querySelector('.episodes').scrollIntoView({ block: 'start' })`);
+  await wait(900);
+  await park();
+  // Just the list: the episode rows are the part of a show that has no film equivalent.
+  const clip = await cdp.eval(`(() => { const r = document.querySelector('.episodes').getBoundingClientRect(); return { x: r.left, y: Math.max(0, r.top), width: r.width, height: Math.min(r.height, innerHeight - Math.max(0, r.top)) }; })()`);
+  await shot('10-tv-episodes.jpg', "a show's seasons and episodes", clip);
+} else {
+  console.log('  – 10-tv-episodes.jpg        skipped: this library holds no shows');
+}
 
 console.log(`\n${n} screenshots written to docs/screenshots/\n`);
 cdp.close();

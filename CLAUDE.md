@@ -18,8 +18,9 @@ A local Netflix-style front end for a personal library of high-bitrate video fil
 2. **Never add on-the-fly transcoding.** This is a REMUX library; re-encoding defeats its
    purpose.
 3. **Never take codecs, HDR, or audio layout from a filename.** ffprobe is authoritative
-   for anything technical. Filenames are authoritative only for edition, source, and
-   release group. TMDB is authoritative for narrative metadata. See ARCHITECTURE.md §5.3.
+   for anything technical. Filenames are authoritative only for edition, source,
+   release group and — for TV — series name and season/episode number, which nothing
+   else can supply. TMDB is authoritative for narrative metadata. See ARCHITECTURE.md §5.3.
 4. **Never hardcode a chip table, and never tune for one machine.** Hardware decode
    capability and GPU headroom vary across Apple Silicon generations and form factors —
    the same build must run well on a fanless laptop and a Mac Studio driving a Pro
@@ -86,12 +87,16 @@ guess.
   volume pairing with UUID relocation, availability resolution.
 - **Enrichment** — TMDB matching and artwork, triggered automatically after a scan.
 - **UI** — library picker with per-drive and combined cards, Netflix-style browse with
-  hero, rows, hover cards and detail modal, search across title/year/genre/director/cast,
-  My List, Continue Watching with progress bars.
+  hero, rows, hover cards and detail modal, search across title/year/genre/director/
+  creator/cast, My List, Continue Watching with progress bars.
+- **TV shows** — episodes recognised and grouped into shows, TMDB series/season/episode
+  metadata and stills, episode list with seasons, next-up, per-episode resume, and
+  Shows/Films tabs. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 134 tests. `pnpm test` covers `packages/*` AND `apps/desktop/src/main`.
-The desktop tests were silently excluded for a long time — do not narrow that glob again.
+**Test suite:** 423 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+`apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
+time — do not narrow that glob again.
 
 ## Open threads
 
@@ -140,7 +145,8 @@ see §"Playback: mpv owns its own window" for the three structural reasons a tra
 overlay cannot work. The only correct fix is libmpv rendering inside Chromium via a
 native addon (`electron-mpv-video`). Do not rebuild the overlay.
 
-**3. Not built, in rough priority order:** trailers (yt-dlp cache), scrub-preview
+**3. Not built, in rough priority order:** next-episode autoplay (Play already knows
+which episode is next; nothing starts it when one ends), trailers (yt-dlp cache), scrub-preview
 thumbnails (needs the thumbfast pattern — a second hidden mpv instance; a pre-generated
 sprite sheet is impossible on an 80 GB file), Skip Intro from chapter markers, a review
 queue for titles TMDB matched wrongly, and the derived SQLite index (deliberately
@@ -319,6 +325,91 @@ Bump `PROBE_VERSION` whenever the ffprobe mapping learns something new. This is 
 same shape as `DERIVE_VERSION` for TMDB, and the same lesson twice: a cache key that
 means "unchanged input" is not a licence to skip recomputing derived output. The scan
 summary prints `N re-probed`, or a rewritten record hides inside "unchanged".
+
+## TV shows
+
+A show is a `Title` with `type: 'show'` and every episode file in `media[]`, stored in
+`db/shows/`, its id prefixed `show-` so a series and a film of the same name cannot
+collide. ARCHITECTURE.md §5.1–5.4 and §7.3–7.4 hold the schema and the rules; this is
+the part that is easy to break.
+
+**The episode gate is strict and hand-written** (`scan/episode.ts`). A file is an episode
+only with an explicit `S01E04`, a `1x04` with a series name or season folder around it,
+or a number-led name DIRECTLY inside `Season N/`. `@ctrl/video-filename-parser`'s TV mode
+was rejected: it reads `Star.Wars.Episode.4.A.New.Hope.1977` as episode 4 of a show. A
+film misread as TV vanishes from the film shelves, so before loosening the gate, add the
+film it would break to the must-stay-a-film list in `episode.test.ts`.
+
+A bare `01.mkv` inside a season-PACK folder (`Show.S02.2160p.REMUX/`) is deliberately
+NOT an episode; the pack only names the series for files that carry `S02E01` themselves.
+
+**Grouping is by name; year and country can only EXCLUDE.** A show split in two is
+visible and recoverable. The Office (UK) merged into The Office (US) is neither. `UK`
+maps to TMDB's `GB`, which is the one surprise in the country table.
+
+**An episode is a SLOT, not a file** (`library/episodes.ts`): one per season/episode,
+holding every copy. Resolve among that slot's copies only — `resolveAmong(slot.files)`.
+`resolve(title)` on a show answers "the best reachable file", which is some OTHER
+episode. Nothing may ever substitute a different episode for the one asked for; an
+episode that is not reachable is reported offline with its drive's name.
+
+**One decision, two callers.** The tile's Play label and `library:play` both go through
+`episodeToPlay` / `nextUp`, so the button cannot say S1:E5 while S1:E4 starts. Next-up
+follows the show's own progress record, whose `contentId` names the episode last
+touched: unfinished → resume it; finished → the next UNWATCHED one after it; all
+watched → rewatch from the first. It never advances into Specials.
+
+**Progress is per episode, keyed by `contentId`** (`state.episodes`), for the same reason
+media is content-addressed. A requested episode resumes from ITS OWN position only —
+never from the show's.
+
+**Remembered tracks are per show, validated per file** (`validTracksFor`). Episodes of
+one series usually share a layout, but `aid=3` sent to a two-track episode is silence
+that reads as healthy. An id the file lacks is dropped; `subtitle: 'no'` always stands.
+
+**The seasons label never lies about the show.** "2 Seasons" for several; for ONE owned
+season its own name — "Season 2" — because "1 Season" beside a nine-season series is a
+claim about the series. "Limited Series" when TMDB calls it a miniseries.
+
+**Views** are `home | list | shows | films`, and the Shows/Films tabs appear only when
+the library holds both. `activeView` is DERIVED from the stored view rather than reset
+by an effect, because Browse returns early before its data loads and no hook can go
+above that return. A library that loses its last show falls back to Home by itself.
+
+**Enrichment**: TV and film ids are separate number spaces at TMDB, so the raw cache is
+`cache/tmdb/tv/`. Names must be near-exact (0.95) because spin-offs share prefixes; any
+rival with a near-exact name that year and country do not rule out sends the show to
+review; popularity never breaks a tie. A matched show is re-enriched when episodes
+arrive that it has no description for (`needsEnrichment`). Only owned seasons and
+episodes are fetched. If a show ever re-matches to a different TMDB id, its stills,
+seasons and artwork are dropped rather than left describing the wrong series.
+
+`MIN_EPISODE_BYTES` (20 MB) replaces the feature floor for files with an `SxxEyy`
+marker: a half-hour SDR episode is far smaller than any film remux.
+
+## state/ is guarded at four layers
+
+The worst bug this project has had, found while testing TV: mpv reports `time-pos` with
+NO `data` as a file unloads. It was recorded as `positionSec: undefined`, which made
+`progress.json` fail validation — and the old `load()` answered an invalid file by
+starting EMPTY, so the next write saved an empty slate over watch history, My List and
+track choices. It happened to the user's real state file, and was salvaged from it.
+
+1. **Engines** pass `msg.data ?? null` — never nothing.
+2. **Callers** record only `typeof pos === 'number' && Number.isFinite(pos)`.
+3. **The store** refuses any write that is not a non-negative finite position
+   (`isPosition`), for films and episodes alike.
+4. **`load()` salvages entry by entry.** Every valid entry is kept, only invalid ones
+   drop; the original is preserved byte for byte as `progress.json.invalid-<ts>` (or
+   `.unparseable-<ts>`) BEFORE anything is changed; the repaired file is written back so
+   the next launch neither salvages again nor leaves another backup; and concurrent
+   loads share one in-flight read, because two callers each holding their own copy of
+   state means one copy's writes are lost.
+
+Do not collapse this back to one layer. Each exists because the one outside it can be
+bypassed by a caller nobody has written yet. `state-safety.test.ts` replays the exact
+corrupted file observed on a real run; 10 of its original 13 tests failed against the
+old code.
 
 ## No required terminal commands
 
@@ -711,7 +802,10 @@ has counted the files — `0/0` is a meaningless fraction to greet a click with.
 ## The combined "All films" card
 
 Shown only when more than one library is paired, first in the row, browsing every
-library at once (`ALL_LIBRARIES` → no volume filter in buildBrowseData).
+library at once (`ALL_LIBRARIES` → no volume filter in buildBrowseData). It is labelled
+"Everything" as soon as any library holds a show — "All films" would be a wrong promise.
+A show's bytes count the largest copy of each EPISODE, not of the show, or a series
+would count as one file.
 
 Its counts are DEDUPLICATED, and this is the whole reason it needs care. Content
 addressing means a film copied between drives is ONE title with two sightings, so

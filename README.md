@@ -6,7 +6,7 @@
 
 Browse your library like a streaming service. Play it like an audiophile.
 
-`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `290 tests`
+`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `423 tests`
 
 </div>
 
@@ -28,6 +28,9 @@ re-encoded, and nothing is ever written to your drives.**
 - **Scans any folder depth** on internal disks, external SSDs and NAS shares, reading
   codecs, HDR format and audio layout from the stream with ffprobe — never from the
   filename.
+- **Understands TV shows** — episodes grouped into series, seasons and episode lists
+  with TMDB names, stills and synopses, per-episode resume, and a Play button that knows
+  which episode comes next.
 - **Fetches artwork, cast, synopses and trailers** from TMDB with your own free token,
   entered in the app.
 - **Browses like a streaming service** — a hero billboard that plays trailers, rows,
@@ -35,7 +38,7 @@ re-encoded, and nothing is ever written to your drives.**
 - **Groups franchises automatically** into collection rows, in release order.
 - **Sorts and filters** by title, year, runtime, file size, genre, resolution, HDR,
   unwatched and availability.
-- **Searches** across title, year, genre, director and cast.
+- **Searches** across title, year, genre, director, creator and cast.
 - **Picks the audio and subtitle track before the film starts**, with commentaries
   labelled, so a disc with four audio mixes and forty-seven subtitle tracks opens on the
   one you wanted. The choice is remembered per film.
@@ -56,6 +59,7 @@ re-encoded, and nothing is ever written to your drives.**
 | **Sort and filter.** Facets come from your library, not a fixed list — a filter that cannot change the result is never offered, so nothing you press does nothing. | ![Filters](docs/screenshots/07-filters.jpg) |
 | **Results are a grid.** Searching, filtering or sorting collapses the shelves into one ordered set, because the size of the answer is the point. | ![Results grid](docs/screenshots/08-results-grid.jpg) |
 | **Choose the track before you start.** A remux carries the feature mix, commentaries and dozens of subtitle tracks. Pick them here rather than hunting through a player menu while the opening plays. | ![Track picker](docs/screenshots/09-track-picker.jpg) |
+| **TV, episode by episode.** Seasons, TMDB's episode names, stills and synopses, and a Play button that means *the next one* — resume where you stopped, or the episode after the one you finished. Each episode has its own resume point. | ![TV episodes](docs/screenshots/10-tv-episodes.jpg) |
 | **Your drives, as they are.** Per-drive cards plus a combined view whose counts are deduplicated — the same film on two drives is one film, not two. | ![Library picker](docs/screenshots/01-library-picker.jpg) |
 
 ---
@@ -140,6 +144,17 @@ posters.
 Everything from here is a button. **Add library** in the picker, choose the folder your
 films are in, and the scan runs straight into fetching metadata and artwork. Nested
 folders are walked to any depth, so pointing it at a drive root is fine.
+
+TV shows live in the same library as films. Any of the usual layouts is recognised:
+
+```
+Breaking Bad/Season 1/Breaking.Bad.S01E01.Pilot.2160p.mkv   SxxEyy in the name
+The.Office.US.S02.2160p.BluRay.REMUX/S02E01.mkv              series from the pack folder
+Chernobyl/Season 1/01 - 1.23.45.mkv                          numbered, inside "Season N"
+```
+
+A year or country suffix (`Doctor.Who.2005`, `The.Office.UK`) keeps a remake apart from
+its original. Anything that does not clearly name a season and an episode stays a film.
 
 Adding, rescanning, pruning and re-fetching artwork are all in the app. The CLI exists
 for debugging and nothing requires it.
@@ -298,6 +313,36 @@ film called **1980s**; with the depth check but no name check, it produced **Rid
 Scott**. A release folder needs one feature directly inside it *whose name the folder
 describes*. Everything else is a shelf, and a shelf gets looked into.
 
+### Star Wars Episode IV is not an episode
+
+The obvious way to recognise TV is to ask a filename parser, and the popular one reads
+`Star.Wars.Episode.4.A.New.Hope.1977` as episode 4 of a show called *Star Wars*, and a
+`Season 01` folder as a show called *Season*. A film misread as an episode vanishes from
+the film shelves, which is far worse than an episode left on them.
+
+So the gate is strict and hand-written: an explicit `S01E04`, or `1x04` with a series
+name, or a numbered file directly inside a folder that says which season it is. Nothing
+else is an episode. The tests pin the films that must never parse as TV alongside the
+episodes that must.
+
+Grouping is conservative for the same reason. Episodes join a show by name; a year or a
+country can only keep two apart, never pull them together. A show split in two is
+visible and fixable. *The Office* (UK) merged into *The Office* (US) is not.
+
+### A player saying nothing must not erase your history
+
+Testing TV playback turned up the worst bug the project has had. mpv reports its
+position as a property change; as a file unloads, that report arrives with *no value*.
+It was recorded as a resume point of `undefined`, which made the saved state invalid —
+and the loader treated one invalid entry as a corrupt file, started empty, and the next
+write saved the empty slate over everything: watch history, My List, track choices.
+
+It is fixed at four layers, because `state/` is the one directory nothing can
+regenerate: the engines pass `null` rather than nothing, the caller ignores anything
+that is not a finite number, the store refuses to write a non-position, and loading
+salvages entry by entry — keeping everything valid, dropping only what is not, and
+saving the original byte for byte beside it before anything is changed.
+
 ### Quality adapts in both directions
 
 Render settings come from GPU cores *and* content resolution — 2160p is four times the
@@ -370,7 +415,7 @@ pnpm scan <path>          # scan a library root and print a report
 pnpm enrich               # TMDB metadata and artwork
 pnpm library [--review]   # list titles, availability, match warnings
 pnpm play <file>          # play with a terminal scrubber and live diagnostics
-pnpm test                 # 290 tests
+pnpm test                 # 423 tests
 pnpm typecheck
 ```
 
@@ -384,7 +429,7 @@ pnpm screenshots          # terminal 2 — writes docs/screenshots/
 
 ## Testing
 
-**290 tests**, run against real files and real behaviour rather than mocks — several
+**423 tests**, run against real files and real behaviour rather than mocks — several
 bugs here were only reproducible with genuine 4K HEVC and actual drive behaviour.
 
 The discovery tests build real directory trees in a temp dir and scan them, including
@@ -392,13 +437,17 @@ the nested-collection case above. The reconciliation tests copy, rename and dele
 on disk to prove identity survives. The row, sort and filter tests exist because
 ordering is their entire substance and none of it shows in a rendered frame — and the
 trailer-ownership tests are each checked to still fail against the code they replaced,
-because a regression test that passes either way is worth nothing.
+because a regression test that passes either way is worth nothing. The TV tests keep a
+list of films that must never be read as episodes beside the episodes that must, ingest
+real ffmpeg-generated files, and replay the exact corrupted state file observed on a
+real run to prove nothing valid in it is lost.
 
 ## Not built
 
 Deliberately deferred, in rough priority order:
 
-- **TV shows.** The schema has a place for them; the scanner is films-only.
+- **Next-episode autoplay.** Play knows which episode is next; nothing yet starts it
+  when the current one ends.
 - **Scrub-preview thumbnails** — needs the `thumbfast` pattern (a second hidden mpv
   instance). A pre-generated sprite sheet is impossible on an 80 GB file.
 - **Skip Intro** from MKV chapter markers.
