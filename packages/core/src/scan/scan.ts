@@ -6,6 +6,7 @@
  * (ARCHITECTURE.md §12). Matching is a separate, networked, resumable step.
  */
 
+import { dirname, relative, sep } from 'node:path';
 import { discoverReleaseUnits, type DiscoveryIssue, type ReleaseUnit } from './discover.js';
 import { extractExternalIds, type ExternalIds } from './sidecar.js';
 import { parseRelease, type ParsedRelease } from './parse.js';
@@ -65,7 +66,13 @@ export async function scanRoot(root: string, opts: ScanOptions = {}): Promise<Sc
 
   let done = 0;
   const titles = await mapLimit(units, opts.concurrency ?? 4, async (unit) => {
-    const parsed = parseRelease(unit.releaseName);
+    /*
+     * The folders between the library root and the file. A film ignores them; an
+     * episode called just `S01E01.mkv` needs them to know which show it belongs to,
+     * and discovery has already flattened it into a bare-file unit by this point.
+     */
+    const folders = relative(root, dirname(unit.videoPath)).split(sep).filter((f) => f && f !== '.');
+    const parsed = parseRelease(unit.releaseName, folders);
     const externalIds = await extractExternalIds(unit.sidecars);
 
     let probeResult: ProbeResult | undefined;

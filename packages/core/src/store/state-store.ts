@@ -16,7 +16,7 @@ import {
   type TrackChoice,
 } from '../schema/index.js';
 
-const EMPTY: StateFile = { version: 1, progress: {}, myList: [], thumbs: {}, tracks: {} };
+const EMPTY: StateFile = { version: 1, progress: {}, myList: [], thumbs: {}, tracks: {}, episodes: {} };
 
 export class StateStore {
   private cache?: StateFile;

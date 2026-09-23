@@ -159,3 +159,41 @@ test('a real edition still beats a release attribute', () => {
   assert.equal(r.edition, "Director's Cut");
   assert.ok(r.releaseAttributes.includes('Hybrid'));
 });
+
+test('a film called "Episode N" stays a film (regression: Star Wars read as TV)', () => {
+  const r = parseRelease('Star.Wars.Episode.4.A.New.Hope.1977.2160p.UHD.BluRay.REMUX-GRP');
+  assert.equal(r.isShow, false);
+  assert.equal(r.year, 1977);
+});
+
+test('an episode carries its series, year and numbering', () => {
+  const r = parseRelease('Severance.2022.S01E03.In.Perpetuity.2160p.ATVP.WEB-DL-GRP');
+  assert.equal(r.isShow, true);
+  assert.equal(r.title, 'Severance');
+  assert.equal(r.year, 2022);
+  assert.deepEqual([r.episode?.season, r.episode?.episode], [1, 3]);
+  // An episode needs no year to be confident, and its air-date year is no second cut.
+  assert.ok(!r.warnings.includes('no-year'));
+  assert.ok(!r.warnings.includes('dual-year'));
+});
+
+test('a series name that is a year survives (not stripped as an embedded year)', () => {
+  const r = parseRelease('1923.S01E01.1080p.WEB-DL-GRP');
+  assert.equal(r.title, '1923');
+});
+
+test('an episode reads its show from the folders around it', () => {
+  const r = parseRelease('S01E02', ['Breaking Bad (2008)', 'Season 01']);
+  assert.equal(r.title, 'Breaking Bad');
+  assert.equal(r.year, 2008);
+});
+
+test('a double episode lists both episodes', () => {
+  assert.deepEqual(parseRelease('Game.of.Thrones.S08E01E02.2160p-GRP').episodes, [1, 2]);
+});
+
+test('a season pack with no placeable episode is flagged, not made into a film', () => {
+  const r = parseRelease('Chernobyl.S01.COMPLETE.2160p.UHD.BluRay.REMUX-GRP');
+  assert.equal(r.isShow, false);
+  assert.ok(r.warnings.includes('tv-without-episode'));
+});

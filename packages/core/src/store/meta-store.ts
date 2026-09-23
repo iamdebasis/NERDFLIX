@@ -71,13 +71,22 @@ export class MetaStore {
     return { titles, issues };
   }
 
-  async get(id: string, type: 'movie' | 'show' = 'movie'): Promise<Title | null> {
-    try {
-      const raw = JSON.parse(await readFile(join(this.dirFor(type), `${id}.json`), 'utf8'));
-      return TitleSchema.parse(raw);
-    } catch {
-      return null;
+  /**
+   * Look a title up by id.
+   *
+   * Without a type, both folders are tried. The UI only ever has an id, and defaulting
+   * to films made every show answer "Title not found" when someone pressed Play.
+   */
+  async get(id: string, type?: 'movie' | 'show'): Promise<Title | null> {
+    for (const t of type ? [type] : (['movie', 'show'] as const)) {
+      try {
+        const raw = JSON.parse(await readFile(join(this.dirFor(t), `${id}.json`), 'utf8'));
+        return TitleSchema.parse(raw);
+      } catch {
+        /* not in this folder — try the next */
+      }
     }
+    return null;
   }
 
   /**

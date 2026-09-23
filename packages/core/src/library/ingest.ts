@@ -16,6 +16,8 @@
 import { relative } from 'node:path';
 import type { ScanReport, ScannedTitle } from '../scan/scan.js';
 import { PROBE_VERSION } from '../scan/probe.js';
+import type { EpisodeRef } from '../scan/episode.js';
+import { normalizeTitle } from '../scan/parse.js';
 import type { LibraryRoot, MediaFile, Sighting, Title } from '../schema/index.js';
 import { makeSlug, makeSortTitle, MetaStore } from '../store/meta-store.js';
 
@@ -40,7 +42,15 @@ export type IngestStats = {
   /** Known content seen on this volume for the first time — a copy from elsewhere. */
   alreadyKnown: number;
   editionsAdded: number;
+  /** Episodes that joined a show already in the library. */
+  episodesAdded: number;
   skippedConfirmed: number;
+  /**
+   * Files deliberately not catalogued, with the reason. Reported rather than turned
+   * into titles: a season pack with no placeable episode would otherwise become a film
+   * called "Show S01", and an episode with no series name has nowhere to go.
+   */
+  skipped: Array<{ relPath: string; reason: 'tv-without-episode' | 'unnamed-series' }>;
   missing: MissingSighting[];
   pruned: number;
 };
@@ -135,6 +145,50 @@ function refreshTechnical(target: MediaFile, fresh: MediaFile): void {
   target.probeVersion = fresh.probeVersion;
 }
 
+/** Stamp episode numbering on a media entry. Recomputed on every scan — see below. */
+function applyEpisode(media: MediaFile, ep: EpisodeRef): void {
+  media.season = ep.season;
+  media.episode = ep.episode;
+  media.episodeEnd = ep.episodeEnd;
+  media.episodeTitle = ep.episodeTitle;
+}
+
+/**
+ * A show's id. The `show-` prefix is not decoration: ids are global — the renderer, the
+ * trailer player and `state/` all key on them — and a show and a film can share a name.
+ * Without it, episodes of the series *Chernobyl* would be filed into the film's record.
+ */
+export function showId(ep: Pick<EpisodeRef, 'series' | 'seriesYear' | 'country'>): string {
+  const base = makeSlug(ep.series, ep.seriesYear);
+  return `show-${base}${ep.country ? `-${ep.country.toLowerCase()}` : ''}`;
+}
+
+/**
+ * Which existing show an episode belongs to.
+ *
+ * Episodes of one show are rarely named identically — one carries a year from its
+ * folder, the next is a bare scene name — so an exact id match alone would split them.
+ * Matching is by name, and a year or country only EXCLUDES: two shows that differ in
+ * either are different shows (The Office 2001 is not The Office 2005).
+ *
+ * When more than one show remains, it refuses to guess. A split show is easy to spot and
+ * costs nothing; a wrong merge mixes two series' episodes under one title.
+ */
+function findShow(shows: Title[], ep: EpisodeRef): Title | null {
+  const key = normalizeTitle(ep.series);
+  const candidates = shows.filter((s) => {
+    const names = [s.title, ...s.searchTitles].map(normalizeTitle);
+    if (!names.includes(key)) return false;
+    if (ep.country && s.originCountry && ep.country !== s.originCountry) return false;
+    if (ep.seriesYear && s.year && Math.abs(ep.seriesYear - s.year) > 1) return false;
+    return true;
+  });
+  if (candidates.length <= 1) return candidates[0] ?? null;
+
+  const exact = candidates.find((s) => s.id === showId(ep));
+  return exact ?? null;
+}
+
 /** Record that this file is (still) here, without duplicating the sighting. */
 function noteSighting(media: MediaFile, sighting: Sighting): 'new' | 'moved' | 'same' {
   const existing = media.sightings.find((s) => s.volumeId === sighting.volumeId);
@@ -168,7 +222,9 @@ export async function ingest(
     relocated: 0,
     alreadyKnown: 0,
     editionsAdded: 0,
+    episodesAdded: 0,
     skippedConfirmed: 0,
+    skipped: [],
     missing: [],
     pruned: 0,
   };
@@ -207,6 +263,12 @@ export async function ingest(
       else if (how === 'new') stats.alreadyKnown += 1;
       else stats.unchanged += 1;
 
+      // Numbering comes from the name, and the name — or the parser — may have changed
+      // since. Identical bytes are no reason to keep a stale S/E.
+      if (known.title.type === 'show' && scanned.parsed.episode) {
+        applyEpisode(known.media, scanned.parsed.episode);
+      }
+
       /**
        * Unless WE have changed.
        *
@@ -228,10 +290,77 @@ export async function ingest(
     }
 
     const { parsed, externalIds } = scanned;
-    const type = parsed.isShow ? ('show' as const) : ('movie' as const);
+    const relPath = media.sightings[0].relPath;
+
+    if (parsed.warnings.includes('tv-without-episode')) {
+      stats.skipped.push({ relPath, reason: 'tv-without-episode' });
+      continue;
+    }
+
+    // --- an episode: file it under its show -------------------------------------
+    if (parsed.episode) {
+      const ep = parsed.episode;
+      if (!ep.series) {
+        stats.skipped.push({ relPath, reason: 'unnamed-series' });
+        continue;
+      }
+      applyEpisode(media, ep);
+
+      const shows = [...byId.values()].filter((t) => t.type === 'show');
+      const show = findShow(shows, ep);
+      if (show) {
+        show.media.push(media);
+        byContent.set(media.contentId, { title: show, media });
+        stats.episodesAdded += 1;
+        await store.save(show);
+        continue;
+      }
+
+      const now = new Date().toISOString();
+      const created: Title = {
+        id: showId(ep),
+        type: 'show',
+        title: ep.series,
+        sortTitle: makeSortTitle(ep.series),
+        year: ep.seriesYear,
+        originCountry: ep.country,
+        overview: '',
+        genres: [],
+        contentTags: [],
+        cast: [],
+        directors: [],
+        creators: [],
+        seasonInfo: [],
+        episodeInfo: [],
+        // Deliberately empty. An episode's .nfo carries the EPISODE's IMDb id, and
+        // matching the whole series on it would attach someone else's show.
+        externalIds: {},
+        artwork: {},
+        media: [media],
+        similarIds: [],
+        matchState: 'unmatched',
+        derivedVersion: 0,
+        matchConfidence: 0,
+        matchWarnings: [],
+        searchTitles: [ep.series],
+        runtimeMinutes: Math.round(media.durationSec / 60),
+        addedAt: now,
+        updatedAt: now,
+      };
+      await store.save(created);
+      byId.set(created.id, created);
+      byContent.set(media.contentId, { title: created, media });
+      stats.created += 1;
+      continue;
+    }
+
+    // --- a film --------------------------------------------------------------
+    const type = 'movie' as const;
     const id = makeSlug(parsed.title || scanned.unit.releaseName, parsed.year);
+    const byIdFilm = byId.get(id);
     const found =
-      (externalIds.imdbId ? byImdb.get(externalIds.imdbId) : undefined) ?? byId.get(id);
+      (externalIds.imdbId ? byImdb.get(externalIds.imdbId) : undefined) ??
+      (byIdFilm?.type === 'movie' ? byIdFilm : undefined);
 
     if (found) {
       found.media.push(media);
@@ -261,6 +390,9 @@ export async function ingest(
       contentTags: [],
       cast: [],
       directors: [],
+      creators: [],
+      seasonInfo: [],
+      episodeInfo: [],
       externalIds: { imdbId: externalIds.imdbId, tmdbId: externalIds.tmdbId },
       artwork: {},
       media: [media],

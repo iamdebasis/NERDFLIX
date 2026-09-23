@@ -89,6 +89,18 @@ export const MediaFileSchema = z.object({
   source: z.string().optional(),
   releaseGroup: z.string().optional(),
 
+  /**
+   * Which episode this file is — shows only. Read from the name and the folders around
+   * it (scan/episode.ts): it is the one structural fact only the filename can supply,
+   * so §5.3 gives numbering to the filename the way it gives it edition and group.
+   */
+  season: z.number().int().nonnegative().optional(),
+  episode: z.number().int().positive().optional(),
+  /** Last episode of a multi-episode file — `S08E01E02` is episode 1, episodeEnd 2. */
+  episodeEnd: z.number().int().positive().optional(),
+  /** The filename's episode title. A fallback only; TMDB's name wins once enriched. */
+  episodeTitle: z.string().optional(),
+
   container: z.string(),
   videoCodec: z.string(),
   profile: z.string().optional(),
@@ -116,6 +128,28 @@ export const ExternalIdsSchema = z.object({
 
 export const MatchStateSchema = z.enum(['auto', 'confirmed', 'review', 'unmatched']);
 
+/** TMDB's description of one season. Shows only, and only seasons the library holds. */
+export const SeasonInfoSchema = z.object({
+  season: z.number().int().nonnegative(),
+  name: z.string(),
+  overview: z.string().optional(),
+  airYear: z.number().int().optional(),
+  /** How many episodes TMDB lists — lets the UI say "8 of 10 episodes" honestly. */
+  episodeCount: z.number().int().nonnegative().optional(),
+});
+
+/** TMDB's description of one owned episode. Keyed by season and number, not by file. */
+export const EpisodeInfoSchema = z.object({
+  season: z.number().int().nonnegative(),
+  episode: z.number().int().positive(),
+  name: z.string(),
+  overview: z.string().optional(),
+  airDate: z.string().optional(),
+  runtimeMinutes: z.number().optional(),
+  /** Local path to the downloaded still, like `artwork.poster`. */
+  still: z.string().optional(),
+});
+
 export const TitleSchema = z.object({
   id: z.string().min(1),
   type: z.enum(['movie', 'show']),
@@ -135,6 +169,19 @@ export const TitleSchema = z.object({
   contentTags: z.array(z.string()).default([]),
   cast: z.array(z.object({ name: z.string(), character: z.string().optional() })).default([]),
   directors: z.array(z.string()).default([]),
+  /** Shows only: who created it. A show's director changes from episode to episode. */
+  creators: z.array(z.string()).default([]),
+  /**
+   * Shows only: a scene country suffix (`The.Office.US`) as a TMDB `origin_country`
+   * code. Kept on the title because the episode that carried it may be a bare
+   * `S01E01.mkv` next time, and it is the one way to tell a remake from its original.
+   */
+  originCountry: z.string().optional(),
+  /** Shows only: the last year it aired, for "2008–2013". Absent while still running. */
+  endYear: z.number().int().optional(),
+  /** Shows only. Named `…Info` so they are never confused with the files in `media`. */
+  seasonInfo: z.array(SeasonInfoSchema).default([]),
+  episodeInfo: z.array(EpisodeInfoSchema).default([]),
   studio: z.string().optional(),
 
   /** TMDB's franchise grouping. Two or more owned members become a row. */
@@ -261,12 +308,30 @@ export const VolumeStoreSchema = z.object({
 
 // --- User state (NEVER regenerated — see §5.4) --------------------------------
 
+/**
+ * Where you are in one episode, keyed by the file's `contentId`.
+ *
+ * Content-addressed for the same reason media is: renaming or moving an episode must
+ * not lose its resume point.
+ */
+export const EpisodeProgressSchema = z.object({
+  positionSec: z.number().nonnegative(),
+  durationSec: z.number().nonnegative(),
+  watched: z.boolean().default(false),
+  lastPlayedAt: z.string(),
+});
+
 export const ProgressSchema = z.object({
   mediaIndex: z.number().int().default(0),
   positionSec: z.number().nonnegative(),
   durationSec: z.number().nonnegative(),
   watched: z.boolean().default(false),
   lastPlayedAt: z.string(),
+  /**
+   * Shows only: WHICH episode this entry is about — the last one touched. For a film the
+   * title is the file; for a show, "resume" means nothing without an episode.
+   */
+  contentId: z.string().optional(),
 });
 
 /**
@@ -291,8 +356,13 @@ export const StateFileSchema = z.object({
   myList: z.array(z.string()).default([]),
   thumbs: z.record(z.string(), z.enum(['up', 'down'])).default({}),
   tracks: z.record(z.string(), TrackChoiceSchema).default({}),
+  /** Per-episode resume points. Defaulted, so every existing state file still parses. */
+  episodes: z.record(z.string(), EpisodeProgressSchema).default({}),
 });
 
 export type Progress = z.infer<typeof ProgressSchema>;
 export type TrackChoice = z.infer<typeof TrackChoiceSchema>;
+export type EpisodeProgress = z.infer<typeof EpisodeProgressSchema>;
+export type SeasonInfo = z.infer<typeof SeasonInfoSchema>;
+export type EpisodeInfo = z.infer<typeof EpisodeInfoSchema>;
 export type StateFile = z.infer<typeof StateFileSchema>;

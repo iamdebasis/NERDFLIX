@@ -6,6 +6,7 @@
  */
 
 import { filenameParse, type ParsedMovie, type ParsedShow } from '@ctrl/video-filename-parser';
+import { parseEpisode, type EpisodeRef } from './episode.js';
 
 export type ParseWarning =
   | 'embedded-year'
@@ -14,7 +15,12 @@ export type ParseWarning =
   | 'empty-title'
   | 'title-too-short'
   | 'technical-token-in-title'
-  | 'dual-year';
+  | 'dual-year'
+  /**
+   * Named like TV — a season pack, a "Season 2" — but with no episode that can be
+   * placed. Ingest skips these rather than inventing a film called "Show S01".
+   */
+  | 'tv-without-episode';
 
 export type ParsedRelease = {
   title: string;
@@ -36,6 +42,8 @@ export type ParsedRelease = {
   isShow: boolean;
   seasons?: number[];
   episodes?: number[];
+  /** Which episode this is, when it is one. See scan/episode.ts. */
+  episode?: EpisodeRef;
   /** Candidate strings to try against TMDB, most likely first. */
   searchTitles: string[];
   /** Specific things that went wrong, for the review queue UI. */
@@ -66,24 +74,20 @@ export function normalizeTitle(title: string): string {
 }
 
 /**
- * TV detection gate.
+ * Named like TV, but not placeable as an episode: `Show.S01.COMPLETE`, `Season 2`.
  *
- * The parser's TV mode must NEVER be used speculatively: given a movie name it
- * hallucinates season/episode numbers out of the year digits
- * (`...Chapter.4.2023.2160p...` → S20E23) and discards the year entirely.
- * So we decide movie-vs-TV ourselves, with an explicit marker regex, and only
- * then pick a parse mode.
+ * Deliberately narrower than it looks. The old gate also accepted a bare "Episode 4",
+ * which read `Star.Wars.Episode.4.A.New.Hope.1977` as television and took a film off
+ * the shelves. Deciding what IS an episode now belongs to scan/episode.ts; this only
+ * spots the leftovers that should be reported rather than turned into films.
  */
-const TV_MARKERS = [
-  /\bS\d{1,2}[\s._-]?E\d{1,3}\b/i, // S01E01, S1.E1
-  /\b\d{1,2}x\d{2,3}\b/, // 1x04
-  /\bseason[\s._-]?\d{1,2}\b/i, // Season 01
-  /\bepisode[\s._-]?\d{1,3}\b/i, // Episode 4
-  /\bS\d{2}[\s._-]?(complete|pack)\b/i, // S01.COMPLETE
+const UNPLACED_TV = [
+  /\bS\d{1,2}[\s._-]+(complete|pack|\d{3,4}p|blu-?ray|web(-?dl|-?rip)?|uhd|remux|hdtv)\b/i,
+  /\bseason[\s._-]?\d{1,2}\b/i,
 ];
 
-function looksLikeTv(name: string): boolean {
-  return TV_MARKERS.some((re) => re.test(name));
+function looksLikeUnplacedTv(name: string): boolean {
+  return UNPLACED_TV.some((re) => re.test(name));
 }
 
 /**
@@ -251,20 +255,38 @@ function sanitizeTitle(
   return { title: title.trim(), originalYear, warnings };
 }
 
-export function parseRelease(rawName: string): ParsedRelease {
+/**
+ * Parse a release name.
+ *
+ * `folders` are the directories containing the file, from the library root down. Films
+ * ignore them; an episode needs them when its own name does not say which show it is.
+ */
+export function parseRelease(rawName: string, folders: readonly string[] = []): ParsedRelease {
   const cleaned = cleanReleaseName(rawName);
-  const isShow = looksLikeTv(cleaned);
+  const episode = parseEpisode(cleaned, folders) ?? undefined;
+  const isShow = episode !== undefined;
 
   const parsed = filenameParse(cleaned, isShow) as ParsedMovie & Partial<ParsedShow>;
-  const yearRaw = parsed.year ? Number(parsed.year) : undefined;
+  const yearRaw = isShow ? episode.seriesYear : parsed.year ? Number(parsed.year) : undefined;
   const year = yearRaw && yearRaw > 1880 && yearRaw < 2100 ? yearRaw : undefined;
 
-  const { title, originalYear, warnings } = sanitizeTitle(parsed.title ?? '', year);
+  /*
+   * A series name comes out of scan/episode.ts already clean, and must NOT go through
+   * the film sanitiser: that strips years embedded in a title, which would turn the
+   * series "1923" into an empty string.
+   */
+  const { title, originalYear, warnings } = isShow
+    ? { title: episode.series, originalYear: undefined, warnings: [] as ParseWarning[] }
+    : sanitizeTitle(parsed.title ?? '', year);
+  if (!isShow && looksLikeUnplacedTv(cleaned)) warnings.push('tv-without-episode');
   const edition = readEdition(parsed, cleaned);
   const releaseAttributes = readReleaseAttributes(cleaned);
 
-  // A second year anywhere in the raw name means a re-cut or restoration.
-  const allYears = [...cleaned.matchAll(/\b(18|19|20)\d{2}\b/g)].map((m) => Number(m[0]));
+  // A second year anywhere in the raw name means a re-cut or restoration. Films only:
+  // an episode's air date in its name is not a second cut of anything.
+  const allYears = isShow
+    ? []
+    : [...cleaned.matchAll(/\b(18|19|20)\d{2}\b/g)].map((m) => Number(m[0]));
   const distinctYears = [...new Set(allYears)];
   if (distinctYears.length > 1 && !warnings.includes('dual-year')) warnings.push('dual-year');
 
@@ -290,8 +312,14 @@ export function parseRelease(rawName: string): ParsedRelease {
     source: readSource(parsed, cleaned),
     releaseGroup: parsed.group ?? undefined,
     isShow,
-    seasons: isShow && Array.isArray(parsed.seasons) ? parsed.seasons : undefined,
-    episodes: isShow && Array.isArray(parsed.episodeNumbers) ? parsed.episodeNumbers : undefined,
+    seasons: isShow ? [episode.season] : undefined,
+    episodes: isShow
+      ? Array.from(
+          { length: (episode.episodeEnd ?? episode.episode) - episode.episode + 1 },
+          (_, i) => episode.episode + i,
+        )
+      : undefined,
+    episode,
     searchTitles: [...new Set(searchTitles)],
     warnings,
     lowConfidence: warnings.length > 0,
