@@ -40,6 +40,30 @@ export type EpisodeRef = {
 
 const MAX_SEASON = 99;
 const MAX_EPISODE = 999;
+
+/**
+ * A season number: one or two digits, or a YEAR.
+ *
+ * Some series are numbered by year rather than from 1 — the classic Tom and Jerry
+ * shorts ship as `Tom and Jerry - S1940E01 - Puss Gets The Boot`, in a folder called
+ * `Season 1940`. Reading `S1940` as nothing turned 46 cartoons into 46 unmatched
+ * "films". Years are accepted only where the context is explicit — an `SxxxxEyy`
+ * marker, a folder named exactly for the season, a season-pack folder — and NOT in the
+ * looser "does this look like TV" check in parse.ts, where `Open.Season.2006` is a film.
+ *
+ * Years first in the alternation, so `S1940` is never read as `S19` plus junk.
+ */
+const SEASON = String.raw`(?:19|20)\d{2}|\d{1,2}`;
+const MARKER = new RegExp(String.raw`\bS(${SEASON})[\s._-]?E(\d{1,3})(?!\d)`, 'i');
+
+/** Is this season number a year (`S1940`) rather than a count? */
+export function isYearSeason(season: number): boolean {
+  return season >= 1900 && season <= 2099;
+}
+
+function plausibleSeason(n: number): boolean {
+  return n <= MAX_SEASON || isYearSeason(n);
+}
 /** A file spanning more episodes than this is a misread, not a real multi-episode file. */
 const MAX_EPISODE_SPAN = 10;
 
@@ -104,11 +128,11 @@ export function seasonFromFolder(folder: string): number | null {
   const f = folder.trim();
   if (/^specials?$/i.test(f)) return 0;
   const m =
-    f.match(/^(?:season|series|staffel|saison|temporada|stagione)[\s._-]*(\d{1,2})$/i) ??
-    f.match(/^s(\d{1,2})$/i);
+    f.match(new RegExp(String.raw`^(?:season|series|staffel|saison|temporada|stagione)[\s._-]*(${SEASON})$`, 'i')) ??
+    f.match(new RegExp(String.raw`^s(${SEASON})$`, 'i'));
   if (!m) return null;
   const n = Number(m[1]);
-  return n <= MAX_SEASON ? n : null;
+  return plausibleSeason(n) ? n : null;
 }
 
 /**
@@ -118,12 +142,12 @@ export function seasonFromFolder(folder: string): number | null {
  */
 export function parseSeasonPack(folder: string): { series: string; season: number } | null {
   const m =
-    folder.match(/^(.+?)[\s._-]+S(\d{1,2})(?![\dE])(?=$|[\s._-])/i) ??
-    folder.match(/^(.+?)[\s._-]+season[\s._-]*(\d{1,2})(?=$|[\s._-])/i);
+    folder.match(new RegExp(String.raw`^(.+?)[\s._-]+S(${SEASON})(?![\dE])(?=$|[\s._-])`, 'i')) ??
+    folder.match(new RegExp(String.raw`^(.+?)[\s._-]+season[\s._-]*(${SEASON})(?=$|[\s._-])`, 'i'));
   if (!m) return null;
   const season = Number(m[2]);
   const series = tidy(m[1]);
-  if (!series || season > MAX_SEASON) return null;
+  if (!series || !plausibleSeason(season)) return null;
   return { series, season };
 }
 
@@ -201,7 +225,7 @@ export function parseEpisode(name: string, folders: readonly string[] = []): Epi
   let rest: string;
   let allowEmptySeries: boolean;
 
-  const sxe = name.match(/\bS(\d{1,2})[\s._-]?E(\d{1,3})(?!\d)/i);
+  const sxe = name.match(MARKER);
   const nxn = sxe ? null : name.match(/\b(\d{1,2})x(\d{2,3})\b/);
 
   if (sxe && sxe.index !== undefined) {
@@ -238,7 +262,7 @@ export function parseEpisode(name: string, folders: readonly string[] = []): Epi
     return null;
   }
 
-  if (season > MAX_SEASON || episode > MAX_EPISODE || episode === 0) return null;
+  if (!plausibleSeason(season) || episode > MAX_EPISODE || episode === 0) return null;
 
   const fromName = cleanSeriesName(before);
   let series = fromName.name;
@@ -278,7 +302,7 @@ export function parseEpisode(name: string, folders: readonly string[] = []): Epi
 
 /** Does a filename carry an explicit episode marker? Used to relax the feature-size floor. */
 export function hasEpisodeMarker(name: string): boolean {
-  return /\bS\d{1,2}[\s._-]?E\d{1,3}(?!\d)/i.test(name);
+  return MARKER.test(name);
 }
 
 /** `S1:E4`, or `S1:E1–E2` for a double episode — Netflix's own short form. */

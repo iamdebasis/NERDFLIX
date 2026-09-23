@@ -9,6 +9,10 @@
  * carry an IMDb URL, which converts a fuzzy title match into an exact one.
  */
 
+// The same marker the episode parser reads, so the size floor and the parser can never
+// disagree about what an episode is.
+import { hasEpisodeMarker } from './episode.js';
+
 export const VIDEO_EXTENSIONS = new Set([
   '.mkv',
   '.mp4',
@@ -36,7 +40,6 @@ export const MIN_FEATURE_BYTES = 200 * 1024 * 1024;
  */
 export const MIN_EPISODE_BYTES = 20 * 1024 * 1024;
 
-const EPISODE_MARKER = /\bS\d{1,2}[\s._-]?E\d{1,3}(?!\d)/i;
 
 /** Exact directory/file names that are always noise. */
 const JUNK_NAMES = new Set([
@@ -102,7 +105,7 @@ export function looksLikeFeature(
 ): boolean {
   if (!isVideoFile(name)) return false;
   // A caller that lowered the floor (tests, odd libraries) keeps its lower value.
-  const floor = EPISODE_MARKER.test(name) ? Math.min(minBytes, MIN_EPISODE_BYTES) : minBytes;
+  const floor = hasEpisodeMarker(name) ? Math.min(minBytes, MIN_EPISODE_BYTES) : minBytes;
   if (sizeBytes < floor) return false;
   if (NON_FEATURE_VIDEO.test(name)) return false;
   return true;

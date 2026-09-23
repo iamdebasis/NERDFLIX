@@ -9,7 +9,10 @@ import {
   parseSeasonPack,
   seasonFromFolder,
   seriesFromFolders,
+  isYearSeason,
 } from './episode.js';
+import { parseRelease } from './parse.js';
+import { looksLikeFeature } from './junk.js';
 
 /**
  * A film read as an episode vanishes from the film shelves, and an episode read as a
@@ -30,6 +33,10 @@ describe('films are never episodes', () => {
     // Resolution-shaped tokens.
     'Some.Film.2020.1920x1080.BluRay',
     'Terminator.2.Judgment.Day.1991.Theatrical.Cut.UHD.BluRay.2160p.HEVC.REMUX-FraMeSToR',
+    // Year-shaped seasons are accepted only in explicit context. These are films.
+    'Open.Season.2006.1080p.BluRay.x264-GRP',
+    'Summer.of.1942.1971.1080p.BluRay.x264-GRP',
+    'Apollo.13.1995.2160p.UHD.BluRay.REMUX-GRP',
   ]) {
     test(name, () => assert.equal(parseEpisode(name), null));
   }
@@ -175,6 +182,64 @@ describe('season folders and packs', () => {
 
   test('seriesFromFolders reads a per-episode release folder', () => {
     assert.equal(seriesFromFolders(['Chernobyl.S01E02.2160p-GRP'])?.name, 'Chernobyl');
+  });
+});
+
+describe('series numbered by year', () => {
+  // The real names, in the real folder, from the library this was built against.
+  const PACK = 'Tom and Jerry - Season 1940 Complete 1080p WEB x264 [i_c]';
+
+  test('S1940E01 is season 1940, episode 1, with its title', () => {
+    const e = parseEpisode('Tom and Jerry - S1940E01 - Puss Gets The Boot', [PACK]);
+    assert.deepEqual(
+      [e?.series, e?.seriesSource, e?.season, e?.episode, e?.episodeTitle],
+      ['Tom and Jerry', 'name', 1940, 1, 'Puss Gets The Boot'],
+    );
+  });
+
+  test('punctuation in the title survives', () => {
+    assert.equal(parseEpisode('Tom and Jerry - S1940E22 - Quiet Please!', [PACK])?.episodeTitle, 'Quiet Please!');
+    assert.equal(parseEpisode("Tom and Jerry - S1940E06 - Puss N' Toots", [PACK])?.episodeTitle, "Puss N' Toots");
+  });
+
+  test('a bare S1940E46 takes the series from the pack folder', () => {
+    const e = parseEpisode('S1940E46 - Tennis Chumps', [PACK]);
+    assert.deepEqual([e?.series, e?.season, e?.episode], ['Tom and Jerry', 1940, 46]);
+  });
+
+  test('a numbered file directly inside a "Season 1940" folder', () => {
+    const e = parseEpisode('05 - Dog Trouble', ['Tom and Jerry', 'Season 1940']);
+    assert.deepEqual([e?.series, e?.season, e?.episode], ['Tom and Jerry', 1940, 5]);
+  });
+
+  test('folders and packs read the year', () => {
+    assert.equal(seasonFromFolder('Season 1940'), 1940);
+    assert.equal(seasonFromFolder('S1940'), 1940);
+    assert.deepEqual(parseSeasonPack(PACK), { series: 'Tom and Jerry', season: 1940 });
+  });
+
+  test('only years that could be years — three digits or 1850 is not a season', () => {
+    assert.equal(parseEpisode('Show.S150E01.1080p'), null);
+    assert.equal(parseEpisode('Show.S1850E01.1080p'), null);
+    assert.equal(isYearSeason(1940), true);
+    assert.equal(isYearSeason(12), false);
+  });
+
+  test('the whole release reads as an episode, and a year-titled film does not', () => {
+    assert.equal(parseRelease('Tom and Jerry - S1940E03 - The Night Before Christmas', [PACK]).episode?.episode, 3);
+    const film = parseRelease('Open.Season.2006.1080p.BluRay.x264-GRP');
+    assert.equal(film.episode, undefined);
+    assert.equal(film.warnings.includes('tv-without-episode'), false, 'Open Season is a film, not unplaced TV');
+  });
+
+  test('a short cartoon passes the episode size floor, not the film one', () => {
+    const cartoon = 'Tom and Jerry - S1940E01 - Puss Gets The Boot.mkv';
+    assert.equal(looksLikeFeature(cartoon, 60 * 1024 * 1024), true);
+    assert.equal(looksLikeFeature('Some.Short.Film.1940.mkv', 60 * 1024 * 1024), false);
+  });
+
+  test('labels keep the season as the file names it', () => {
+    assert.equal(episodeLabel({ season: 1940, episode: 1 }), 'S1940:E1');
   });
 });
 
