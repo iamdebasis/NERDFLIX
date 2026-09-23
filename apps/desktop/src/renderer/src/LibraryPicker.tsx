@@ -304,8 +304,8 @@ export function LibraryPicker({
           {connected < cards.length && (
             <p className="subhead">
               {cards.length - connected === 1
-                ? 'One drive isn’t connected. Its films are still listed.'
-                : `${cards.length - connected} drives aren’t connected. Their films are still listed.`}
+                ? 'One drive isn’t connected. Everything on it is still listed.'
+                : `${cards.length - connected} drives aren’t connected. Everything on them is still listed.`}
             </p>
           )}
         </div>

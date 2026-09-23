@@ -186,6 +186,10 @@ async function main() {
         `    ${C.green}${stats.created} new${C.reset} · ${stats.updated} updated · ` +
           `${C.dim}${stats.unchanged} unchanged${C.reset}` +
           (stats.editionsAdded ? ` · ${C.cyan}${stats.editionsAdded} extra editions${C.reset}` : '') +
+          // An episode joining a show is neither "new" (no title was created) nor
+          // "unchanged" — without this a scan that added a season read as a no-op.
+          (stats.episodesAdded ? ` · ${C.cyan}${stats.episodesAdded} episodes added${C.reset}` : '') +
+          (stats.skipped.length ? ` · ${C.yellow}${stats.skipped.length} skipped${C.reset}` : '') +
           // Otherwise a re-probe is invisible, and "unchanged" would be a lie about
           // records that were just rewritten.
           (stats.reprobed ? ` · ${C.cyan}${stats.reprobed} re-probed${C.reset}` : '') +

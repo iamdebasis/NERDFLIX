@@ -2276,3 +2276,285 @@ body {
   background: #1c1c1c;
   color: #e5e5e5;
 }
+
+/* ------------------------------------------------------------------ *
+ * TV shows
+ *
+ * The show surfaces reuse the film tokens — the same gutters (3rem), the same red,
+ * the same badge and select styles — so a show's detail view reads as the same
+ * product rather than a bolted-on page.
+ * ------------------------------------------------------------------ */
+
+/* For assistive tech only: the season select's label, which the heading already says. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* --- Hover card: which episode Play means --------------------------------- */
+
+.hover-nextup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.1rem 0 0.5rem;
+}
+.hover-nextup-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.28);
+  overflow: hidden;
+}
+.hover-nextup-bar > span { display: block; height: 100%; background: var(--red); }
+.hover-nextup-label {
+  font-size: 0.8rem;
+  color: #d2d2d2;
+  /* One line: a long episode name must not push the genres off the card. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hover-nextup-label strong { color: #fff; font-weight: 600; margin-right: 0.25rem; }
+
+/* --- Detail hero: next-up above Play -------------------------------------- */
+
+.nextup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-width: 26rem;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
+}
+.nextup-kind {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #d2d2d2;
+}
+.nextup-episode {
+  font-size: 1.05rem;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nextup-name { color: #e6e6e6; }
+/*
+ * `.resume-bar` is `flex: 1` because it lives in a ROW beside its label. Inside this
+ * column, flex runs vertically and a basis of 0 made the bar 0px tall — present,
+ * filled to 70%, and invisible. Measured, not guessed.
+ */
+.nextup-bar { flex: none; margin-top: 0.3rem; max-width: 18rem; }
+
+/* --- Episode list --------------------------------------------------------- */
+
+.episodes {
+  padding: 0.5rem 3rem 2.75rem;
+}
+/* Holds the heading's height while the list loads, so the dialog does not jump. */
+.episodes.is-loading { min-height: 5rem; }
+
+.episodes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.9rem;
+}
+.episodes-head h2 {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: #fff;
+}
+.season-name {
+  font-size: 1.05rem;
+  color: #e6e6e6;
+}
+
+/* The season select borrows the track picker's closed control — one select style. */
+.season-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0.5rem 2.25rem 0.5rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 4px;
+  background-color: #242424;
+  color: #fff;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ddd' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 0.95rem;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.season-select select:hover { border-color: rgba(255, 255, 255, 0.55); }
+.season-select select:focus-visible { outline: none; border-color: #fff; }
+.season-select option { background: #1c1c1c; color: #e5e5e5; }
+
+.episodes-note {
+  margin: -0.35rem 0 0.9rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.episode-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.episode-list li { border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
+
+/*
+ * One button per row: clicking anywhere on it plays that episode. The grid keeps the
+ * number, still and text in fixed columns, so rows with and without a synopsis line
+ * up down the list.
+ */
+.episode {
+  display: grid;
+  grid-template-columns: 2.75rem 9.5rem 1fr;
+  align-items: center;
+  gap: 1.1rem;
+  width: 100%;
+  padding: 1.1rem 0.75rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.episode:hover:not(:disabled),
+.episode:focus-visible { background-color: rgba(255, 255, 255, 0.07); outline: none; }
+/* Next-up is marked the way Netflix marks the current episode: a quiet lift. */
+.episode.is-next { background-color: rgba(255, 255, 255, 0.1); }
+.episode:disabled { cursor: default; }
+
+.episode-number {
+  font-size: 1.5rem;
+  font-weight: 400;
+  color: #d2d2d2;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.episode-still {
+  position: relative;
+  display: block;
+  width: 9.5rem;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #2a2a2a;
+}
+.episode-still img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* No still from TMDB: the episode's own label, not a grey void. */
+.episode-still-fallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #8a8a8a;
+  background: linear-gradient(135deg, #2e2e2e, #1f1f1f);
+}
+
+/* The play glyph appears on intent — hover or focus — as on Netflix. */
+.episode-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  background: rgba(0, 0, 0, 0.35);
+  transition: opacity 160ms ease;
+}
+.episode-play > svg {
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0.55rem;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+}
+.episode:hover:not(:disabled) .episode-play,
+.episode:focus-visible .episode-play,
+/* While an episode starts, its row keeps the spinner visible even though every row is
+   disabled — the class is the real IconSpinner's, or the pressed row shows nothing. */
+.episode:disabled .episode-play:has(.icon-spin) { opacity: 1; }
+
+.episode-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.3);
+}
+.episode-progress > span { display: block; height: 100%; background: var(--red); }
+
+.episode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.episode-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.episode-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.episode-runtime {
+  flex: none;
+  font-size: 0.92rem;
+  color: #d2d2d2;
+  font-variant-numeric: tabular-nums;
+}
+.episode-overview {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: #b8b8b8;
+  /* Three lines, then an ellipsis — a synopsis must not make one row a wall. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.episode-offline {
+  font-size: 0.8rem;
+  color: #d2d2d2;
+}
+
+/* An episode on an unplugged drive stays listed — you should see what you own — but
+   reads as out of reach. */
+.episode.is-offline .episode-still img { filter: grayscale(0.85) brightness(0.55); }
+.episode.is-offline .episode-name,
+.episode.is-offline .episode-number { color: #8a8a8a; }

@@ -64,6 +64,8 @@ export type NextUpCard = {
 /** Show-only facts for tiles, the hover card and the billboard. */
 export type ShowSummary = {
   seasonCount: number;
+  /** "2 Seasons", "1 Season", "Limited Series", "Specials" — what Netflix prints there. */
+  seasonsLabel: string;
   episodeCount: number;
   creators: string[];
   /** "2008–2013" for an ended show; just the first year while it is running. */
@@ -88,6 +90,8 @@ export type TitleCard = {
   certification?: string;
   cast: string[];
   directors: string[];
+  /** A film's studio, or a show's network ("HBO") — what people know a series by. */
+  studio?: string;
   /** TMDB's franchise grouping, when the film is in one. Drives the collection rows. */
   collection?: { id: number; name: string };
   /** ISO timestamp of when the scanner first recorded it — the sort key for "recent". */

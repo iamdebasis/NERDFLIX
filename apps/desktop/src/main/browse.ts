@@ -139,6 +139,7 @@ export async function buildBrowseData(
       cast: t.cast.map((c) => c.name),
       directors: t.directors,
       collection: t.collection,
+      studio: t.studio,
       addedAt: t.addedAt,
       poster: artUrl(t.id, 'poster.jpg', Boolean(t.artwork.poster)),
       backdrop: artUrl(t.id, 'backdrop.jpg', Boolean(t.artwork.backdrop)),

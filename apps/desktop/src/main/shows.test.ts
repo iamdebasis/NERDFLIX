@@ -113,6 +113,18 @@ describe('show summary', () => {
   });
 });
 
+describe('seasons label', () => {
+  test('counts, a miniseries, and specials', () => {
+    assert.equal(showSummary(show([ep(1, 1), ep(2, 1)]), ctx()).summary.seasonsLabel, '2 Seasons');
+    assert.equal(showSummary(show([ep(1, 1)]), ctx()).summary.seasonsLabel, 'Season 1');
+    // Owning season 2 of a long show must not read as a one-season show.
+    assert.equal(showSummary(show([ep(2, 1)], { seasonInfo: [] }), ctx()).summary.seasonsLabel, 'Season 2');
+    const mini = show([ep(1, 1)], { seasonInfo: [{ season: 1, name: 'Miniseries' }] });
+    assert.equal(showSummary(mini, ctx()).summary.seasonsLabel, 'Limited Series');
+    assert.equal(showSummary(show([ep(0, 1)]), ctx()).summary.seasonsLabel, 'Specials');
+  });
+});
+
 describe('episode list', () => {
   const list = showEpisodes(show([ep(1, 1), ep(1, 2, { episodeTitle: 'Cats in the Bag' })]), ctx());
 

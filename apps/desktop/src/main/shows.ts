@@ -74,6 +74,25 @@ function resumePctOf(p: EpisodeProgress | undefined): number | null {
   return Math.min(100, Math.max(0, (p.positionSec / p.durationSec) * 100));
 }
 
+/**
+ * How many seasons are ON YOUR DRIVES, said so it cannot be misread.
+ *
+ * "2 Seasons" for several. For exactly one, the season's own name — "Season 2" —
+ * because "1 Season" reads as a claim about the SHOW: owning season 2 of The Office's
+ * nine printed "1 Season" beside a nine-season series. A one-season show TMDB calls a
+ * miniseries is "Limited Series", which is what Netflix prints for Chernobyl.
+ */
+export function seasonsLabel(title: Pick<Title, 'seasonInfo'>, regularSeasons: readonly number[]): string {
+  if (regularSeasons.length === 0) return 'Specials';
+  if (regularSeasons.length === 1) {
+    const season = regularSeasons[0];
+    const name = title.seasonInfo.find((s) => s.season === season)?.name ?? '';
+    if (/mini-?series|limited/i.test(name)) return 'Limited Series';
+    return /^season \d+$/i.test(name) ? name : `Season ${season}`;
+  }
+  return `${regularSeasons.length} Seasons`;
+}
+
 export type ShowContext = {
   resolver: MediaResolver;
   /** Every episode resume point, keyed by contentId. */
@@ -120,6 +139,7 @@ export function showSummary(
   return {
     summary: {
       seasonCount: regularSeasons.length,
+      seasonsLabel: seasonsLabel(title, regularSeasons),
       episodeCount: slots.length,
       creators: title.creators,
       yearLabel,

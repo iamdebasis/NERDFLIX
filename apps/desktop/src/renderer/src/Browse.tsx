@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   BrowseData,
+  NextUpCard,
+  ShowEpisodes,
   TitleCard,
   TrackChoice,
   TrackInfo,
@@ -38,15 +40,32 @@ declare global {
 }
 
 
+/** "45m", "1h", "2h 45m" — never "1h 0m", which is how a 60-minute episode read. */
 function fmtRuntime(min?: number): string {
   if (!min) return '';
   const h = Math.floor(min / 60);
   const m = min % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
+/** "12 films", "4 shows", or "16 titles" when the set holds both. */
+function countNoun(cards: readonly TitleCard[]): string {
+  const shows = cards.filter((c) => c.type === 'show').length;
+  const films = cards.length - shows;
+  const word = (n: number, w: string) => `${n} ${n === 1 ? w : `${w}s`}`;
+  if (shows && films) return word(cards.length, 'title');
+  return shows ? word(shows, 'show') : word(films, 'film');
+}
+
+/**
+ * TB, GB, or MB — whichever says something. Whole gigabytes alone printed "0 GB" for
+ * anything under half a gigabyte, which is most of an SD episode and a short season.
+ */
 function fmtBytes(n: number): string {
-  return n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : `${(n / 1e9).toFixed(0)} GB`;
+  if (n >= 1e12) return `${(n / 1e12).toFixed(1)} TB`;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(0)} GB`;
+  return `${Math.max(1, Math.round(n / 1e6))} MB`;
 }
 
 /**
@@ -61,6 +80,24 @@ function fmtBytes(n: number): string {
 function unavailableLabel(card: TitleCard): string {
   return card.offlineOn ? `On ${card.offlineOn}` : 'Not on any paired drive';
 }
+
+/**
+ * The Play button's word. For a show it follows next-up — "Resume" only when there is
+ * an episode part-way through, because "Resume" on a show you finished yesterday would
+ * mean the NEXT episode, which is not what the word says.
+ */
+function playLabel(card: TitleCard): string {
+  if (card.type === 'show') return card.show?.nextUp?.reason === 'resume' ? 'Resume' : 'Play';
+  return card.resumeSec !== null ? 'Resume' : 'Play';
+}
+
+/** What next-up is, in the words the hero uses above the Play button. */
+const NEXT_UP_REASON: Record<NextUpCard['reason'], string> = {
+  resume: 'Continue watching',
+  next: 'Next episode',
+  start: 'Start watching',
+  rewatch: 'Watch again',
+};
 
 // --- Icons ------------------------------------------------------------------
 
@@ -286,12 +323,33 @@ function HoverCard({
               so it does not jump position mid-transition. */}
           {card.year ? <span>{card.year}</span> : null}
           {card.certification && <span className="cert">{card.certification}</span>}
-          {/* Guarded rather than always rendered: an unenriched title has no runtime
-              and an empty span still takes a gap, leaving a stray separator. */}
-          {card.runtimeMinutes ? <span>{fmtRuntime(card.runtimeMinutes)}</span> : null}
+          {/* A show's length is its seasons, not the first episode's runtime — which is
+              all `runtimeMinutes` knows about a show, and would read as a short film. */}
+          {card.type === 'show' ? (
+            <span>{card.show?.seasonsLabel}</span>
+          ) : card.runtimeMinutes ? (
+            // Guarded rather than always rendered: an unenriched title has no runtime
+            // and an empty span still takes a gap, leaving a stray separator.
+            <span>{fmtRuntime(card.runtimeMinutes)}</span>
+          ) : null}
           {card.resolution ? <span className="tag">{card.resolution}</span> : null}
           {card.hdr !== 'SDR' && <span className="tag hdr">{card.hdr}</span>}
         </div>
+
+        {/* Once you have started a show, say which episode Play means — the button
+            alone cannot, and pressing it to find out is how you land in the wrong one. */}
+        {card.show?.nextUp && card.show.nextUp.reason !== 'start' && (
+          <div className="hover-nextup">
+            {card.show.nextUp.resumePct !== null && (
+              <span className="hover-nextup-bar">
+                <span style={{ width: `${card.show.nextUp.resumePct}%` }} />
+              </span>
+            )}
+            <span className="hover-nextup-label">
+              <strong>{card.show.nextUp.label}</strong> {card.show.nextUp.name}
+            </span>
+          </div>
+        )}
 
         <div className="hover-genres">{card.genres.slice(0, 3).join(' · ')}</div>
       </div>
@@ -350,6 +408,154 @@ function TrackSelect({
   );
 }
 
+/**
+ * A show's episodes, one season at a time.
+ *
+ * Fetched when the dialog opens rather than carried on every card: a show can have a
+ * hundred episodes with synopses and stills, and only this surface wants them. Refetched
+ * whenever the card is replaced — which happens when browse data refreshes after
+ * playback — so coming back from an episode shows its new progress.
+ *
+ * Each row is ONE button. Clicking anywhere on it plays that episode: a small play
+ * target inside a large row is a miss waiting to happen, and Netflix's row is whole.
+ */
+function EpisodeList({
+  card,
+  starting,
+  onPlayEpisode,
+}: {
+  card: TitleCard;
+  starting: boolean;
+  onPlayEpisode: (key: string) => void;
+}) {
+  const [data, setData] = useState<ShowEpisodes | null>(null);
+  const [season, setSeason] = useState<number | null>(null);
+  // Which row was pressed, so the spinner appears on it rather than on every row.
+  const [pressed, setPressed] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    window.playback
+      .episodes(card.id)
+      .then((d) => {
+        if (!live) return;
+        setData(d);
+        // Open on the season Play means, keeping the one being browsed if it still exists.
+        const nextSeason = d.episodes.find((e) => e.key === d.nextUpKey)?.season;
+        setSeason((cur) =>
+          cur !== null && d.seasons.some((s) => s.season === cur)
+            ? cur
+            : (nextSeason ?? d.seasons[0]?.season ?? null),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [card]);
+
+  useEffect(() => {
+    if (!starting) setPressed(null);
+  }, [starting]);
+
+  if (!data || season === null) {
+    // Reserve the heading's height so the dialog does not jump when the list arrives.
+    return <section className="episodes is-loading" aria-busy="true" />;
+  }
+
+  const info = data.seasons.find((s) => s.season === season);
+  const rows = data.episodes.filter((e) => e.season === season);
+
+  return (
+    <section className="episodes" aria-label="Episodes">
+      <header className="episodes-head">
+        <h2>Episodes</h2>
+        {data.seasons.length > 1 ? (
+          <label className="season-select">
+            <span className="visually-hidden">Season</span>
+            <select value={season} onChange={(e) => setSeason(Number(e.target.value))}>
+              {data.seasons.map((s) => (
+                <option key={s.season} value={s.season}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <span className="season-name">{info?.name}</span>
+        )}
+      </header>
+
+      {/* Honest about a partial season rather than implying the list is complete. */}
+      {info?.total && info.total > info.owned ? (
+        <p className="episodes-note">
+          {info.owned} of {info.total} episodes on your drives
+        </p>
+      ) : null}
+
+      <ol className="episode-list">
+        {rows.map((ep) => {
+          const isNext = ep.key === data.nextUpKey;
+          const busy = starting && pressed === ep.key;
+          const progress = ep.watched ? 100 : ep.resumePct;
+          return (
+            <li key={ep.key}>
+              <button
+                className={`episode${isNext ? ' is-next' : ''}${ep.available ? '' : ' is-offline'}${ep.watched ? ' is-watched' : ''}`}
+                disabled={!ep.available || starting}
+                onClick={() => {
+                  setPressed(ep.key);
+                  onPlayEpisode(ep.key);
+                }}
+                title={
+                  ep.available
+                    ? `Play ${ep.label}`
+                    : ep.offlineOn
+                      ? `On ${ep.offlineOn}`
+                      : 'Not on any paired drive'
+                }
+              >
+                <span className="episode-number">{ep.number}</span>
+
+                <span className="episode-still">
+                  {ep.still ? (
+                    <img src={ep.still} alt="" draggable={false} loading="lazy" />
+                  ) : (
+                    <span className="episode-still-fallback">{ep.label}</span>
+                  )}
+                  <span className="episode-play" aria-hidden="true">
+                    {busy ? <IconSpinner /> : <IconPlay />}
+                  </span>
+                  {progress !== null && (
+                    <span className="episode-progress">
+                      <span style={{ width: `${progress}%` }} />
+                    </span>
+                  )}
+                </span>
+
+                <span className="episode-text">
+                  <span className="episode-title-row">
+                    <span className="episode-name">{ep.name}</span>
+                    {ep.runtimeMinutes ? (
+                      <span className="episode-runtime">{fmtRuntime(ep.runtimeMinutes)}</span>
+                    ) : null}
+                  </span>
+                  {ep.overview && <span className="episode-overview">{ep.overview}</span>}
+                  {!ep.available && (
+                    <span className="episode-offline">
+                      {ep.offlineOn ? `On ${ep.offlineOn}` : 'Not on any paired drive'}
+                    </span>
+                  )}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 function DetailModal({
   card,
   onClose,
@@ -359,11 +565,15 @@ function DetailModal({
 }: {
   card: TitleCard;
   onClose: () => void;
-  onPlay: (tracks?: TrackChoice) => void;
+  /** `episodeKey` plays that episode; omitted, a show plays next-up. */
+  onPlay: (tracks?: TrackChoice, episodeKey?: string) => void;
   onToggleList: () => void;
   /** A film is being opened; the dialog stays until it is running. */
   starting: boolean;
 }) {
+  const isShow = card.type === 'show';
+  const next = card.show?.nextUp ?? null;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -462,7 +672,23 @@ function DetailModal({
                 <h1 className="modal-title">{card.title}</h1>
               )}
 
-              {card.resumeSec !== null && (
+              {/* For a show, say WHICH episode Play means before the button does it. */}
+              {isShow && next && (
+                <div className="nextup">
+                  <span className="nextup-kind">{NEXT_UP_REASON[next.reason]}</span>
+                  <span className="nextup-episode">
+                    <strong>{next.label}</strong>
+                    {next.name ? <span className="nextup-name"> · {next.name}</span> : null}
+                  </span>
+                  {next.resumePct !== null && (
+                    <div className="resume-bar nextup-bar">
+                      <span style={{ width: `${next.resumePct}%` }} />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!isShow && card.resumeSec !== null && (
                 <div className="resume-row">
                   <div className="resume-bar">
                     <span style={{ width: `${resumePct}%` }} />
@@ -481,9 +707,7 @@ function DetailModal({
                   disabled={!card.available || starting}
                 >
                   {starting ? <IconSpinner /> : <IconPlay />}
-                  <span>
-                    {starting ? 'Starting…' : card.resumeSec !== null ? 'Resume' : 'Play'}
-                  </span>
+                  <span>{starting ? 'Starting…' : playLabel(card)}</span>
                 </button>
                 <button
                   className="circle big"
@@ -539,8 +763,17 @@ function DetailModal({
             <div className="modal-body">
               <div>
                 <div className="modal-meta">
-                  {card.year && <span>{card.year}</span>}
-                  <span>{fmtRuntime(card.runtimeMinutes)}</span>
+                  {isShow ? (
+                    <>
+                      {card.show?.yearLabel && <span>{card.show.yearLabel}</span>}
+                      <span>{card.show?.seasonsLabel}</span>
+                    </>
+                  ) : (
+                    <>
+                      {card.year && <span>{card.year}</span>}
+                      <span>{fmtRuntime(card.runtimeMinutes)}</span>
+                    </>
+                  )}
                   <span className="tag">{card.resolution}</span>
                   {card.hdr !== 'SDR' && <span className="tag hdr">{card.hdr}</span>}
                   {card.certification && <span className="cert">{card.certification}</span>}
@@ -562,15 +795,31 @@ function DetailModal({
                     {card.directors.join(', ')}
                   </p>
                 )}
+                {/* A show's director changes every episode; who made it is its creator. */}
+                {isShow && (card.show?.creators.length ?? 0) > 0 && (
+                  <p>
+                    <span className="label">Created by: </span>
+                    {card.show!.creators.join(', ')}
+                  </p>
+                )}
                 {card.genres.length > 0 && (
                   <p>
                     <span className="label">Genres: </span>
                     {card.genres.join(', ')}
                   </p>
                 )}
+                {isShow && card.studio && (
+                  <p>
+                    <span className="label">Network: </span>
+                    {card.studio}
+                  </p>
+                )}
                 <p className="file-line">
                   {card.audio && <>{card.audio} · </>}
-                  {card.bitrateMbps} Mb/s · {fmtBytes(card.sizeBytes)}
+                  {isShow
+                    ? `${card.show?.episodeCount} ${card.show?.episodeCount === 1 ? 'episode' : 'episodes'}`
+                    : `${card.bitrateMbps} Mb/s`}{' '}
+                  · {fmtBytes(card.sizeBytes)}
                 </p>
                 {card.editions.length > 1 && (
                   <p>
@@ -580,6 +829,14 @@ function DetailModal({
                 )}
               </aside>
             </div>
+
+            {isShow && (
+              <EpisodeList
+                card={card}
+                starting={starting}
+                onPlayEpisode={(key) => onPlay({ audio, subtitle }, key)}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -697,7 +954,7 @@ export function Browse({
    * navigation and did nothing, which is worse than omitting them. My List is a
    * genuinely different view of the library, so it gets one.
    */
-  const [view, setView] = useState<'home' | 'list'>('home');
+  const [view, setView] = useState<'home' | 'list' | 'shows' | 'films'>('home');
 
   /**
    * Search matters at real library sizes. Nine posters fit on a screen; a hundred and
@@ -748,14 +1005,19 @@ export function Browse({
    * If it fails, the surface stays put and says why, which is the only moment the
    * context is still useful.
    */
-  const play = async (titleId: string, fromStart = false, tracks?: TrackChoice) => {
+  const play = async (
+    titleId: string,
+    fromStart = false,
+    tracks?: TrackChoice,
+    episodeKey?: string,
+  ) => {
     setPlayError(null);
     suspendTrailer();
     setStarting(true);
     try {
       // Only the detail view carries a picker. Everywhere else sends nothing, and the
       // main process falls back to whatever was chosen for this film last time.
-      await window.playback.play(titleId, { fromStart, tracks });
+      await window.playback.play(titleId, { fromStart, tracks, episodeKey });
       setHover(null);
       setOpen(null);
     } catch (err) {
@@ -916,6 +1178,7 @@ export function Browse({
     String(c.year ?? '').includes(q) ||
     c.genres.some((g) => g.toLowerCase().includes(q)) ||
     c.directors.some((d) => d.toLowerCase().includes(q)) ||
+    (c.show?.creators ?? []).some((d) => d.toLowerCase().includes(q)) ||
     c.cast.some((n) => n.toLowerCase().includes(q));
 
   /**
@@ -923,12 +1186,30 @@ export function Browse({
    * narrowed set is sorted. They compose rather than override each other: filtering
    * search results, or sorting My List, are both reasonable things to want.
    */
-  const base = view === 'list' ? allCards.filter((c) => c.inMyList) : allCards;
+  /*
+   * TV Shows and Films are offered only when the library holds both — a tab that shows
+   * the same thing as Browse is a control that cannot change anything, the same rule
+   * the filter facets follow.
+   */
+  const hasShows = allCards.some((c) => c.type === 'show');
+  const hasFilms = allCards.some((c) => c.type === 'movie');
+  // Derived, not stored: if a rescan leaves only films, the TV tab disappears and the
+  // page reads as Browse — rather than staying stuck on a view with no way back.
+  const activeView =
+    (view === 'shows' || view === 'films') && !(hasShows && hasFilms) ? 'home' : view;
+  const typeView = activeView === 'shows' ? 'show' : activeView === 'films' ? 'movie' : null;
+
+  const base =
+    activeView === 'list'
+      ? allCards.filter((c) => c.inMyList)
+      : typeView
+        ? allCards.filter((c) => c.type === typeView)
+        : allCards;
   const searched = q ? base.filter(matches) : base;
   const result = applyFilters(searched, filters);
 
   const narrowed = isNarrowed(filters, sort);
-  const collapsed = Boolean(q) || view === 'list' || narrowed;
+  const collapsed = Boolean(q) || activeView === 'list' || narrowed;
 
   // Only a narrowed set is re-ordered. My List keeps the order things were added in
   // and search keeps the library's, which is what each of them meant before.
@@ -936,16 +1217,29 @@ export function Browse({
 
   const resultTitle = q
     ? `Results for “${query.trim()}”`
-    : view === 'list'
+    : activeView === 'list'
       ? 'My List'
-      : `${result.length} ${result.length === 1 ? 'film' : 'films'}`;
+      : countNoun(result);
 
-  const visibleRows = collapsed
-    ? [{ title: resultTitle, cards: resultCards }]
-    : (data?.rows ?? []).map((row) => ({
-        title: row.title,
-        cards: row.titleIds.map((id) => byId.get(id)).filter(Boolean) as TitleCard[],
-      }));
+  /*
+   * TV Shows / Films keep the SHELVES, filtered — the way Netflix's own TV and Films
+   * pages are shelves rather than a grid. The fixed rows survive with one title; a
+   * genre or franchise row filtered down to one is noise and goes, the same MIN_ROW
+   * rule the main process applies. "TV Shows" is dropped from the TV view as redundant.
+   */
+  const shelves = (data?.rows ?? []).map((row) => ({
+    title: row.title,
+    cards: row.titleIds.map((id) => byId.get(id)).filter(Boolean) as TitleCard[],
+  }));
+  const FIXED_ROWS = new Set(['Continue Watching', 'My List', 'Recently Added']);
+  const typedShelves = typeView
+    ? shelves
+        .filter((row) => row.title !== 'TV Shows')
+        .map((row) => ({ ...row, cards: row.cards.filter((c) => c.type === typeView) }))
+        .filter((row) => row.cards.length >= (FIXED_ROWS.has(row.title) ? 1 : 2))
+    : shelves;
+
+  const visibleRows = collapsed ? [{ title: resultTitle, cards: resultCards }] : typedShelves;
 
   // Offered from what the library actually holds, never a fixed list — a pill that
   // cannot change the result set is a control that looks broken when you press it.
@@ -958,7 +1252,7 @@ export function Browse({
 
   // The hero belongs to the full browse. Over a filtered view it is just a large
   // picture of something you did not ask for.
-  const showHero = !q && view === 'home' && !narrowed;
+  const showHero = !q && activeView === 'home' && !narrowed;
 
   return (
     <div
@@ -978,7 +1272,7 @@ export function Browse({
 
         <nav className="nav-links">
           <button
-            className={view === 'home' ? 'active' : ''}
+            className={activeView === 'home' ? 'active' : ''}
             onClick={() => {
               setView('home');
               setQuery('');
@@ -986,8 +1280,30 @@ export function Browse({
           >
             Browse
           </button>
+          {hasShows && hasFilms && (
+            <>
+              <button
+                className={activeView === 'shows' ? 'active' : ''}
+                onClick={() => {
+                  setView('shows');
+                  setQuery('');
+                }}
+              >
+                TV Shows
+              </button>
+              <button
+                className={activeView === 'films' ? 'active' : ''}
+                onClick={() => {
+                  setView('films');
+                  setQuery('');
+                }}
+              >
+                Films
+              </button>
+            </>
+          )}
           <button
-            className={view === 'list' ? 'active' : ''}
+            className={activeView === 'list' ? 'active' : ''}
             onClick={() => {
               setView('list');
               setQuery('');
@@ -1191,9 +1507,7 @@ export function Browse({
                 onClick={() => void play(hero.id)}
               >
                 {starting ? <IconSpinner /> : <IconPlay />}
-                <span>
-                  {starting ? 'Starting…' : hero.resumeSec !== null ? 'Resume' : 'Play'}
-                </span>
+                <span>{starting ? 'Starting…' : playLabel(hero)}</span>
               </button>
               <button className="info-button" onClick={() => setOpen(hero)}>
                 <IconInfo />
@@ -1232,7 +1546,7 @@ export function Browse({
           */}
         {collapsed && visibleRows[0].cards.length === 0 && (
           <p className="browse-empty">
-            {view === 'list' && base.length === 0 ? (
+            {activeView === 'list' && base.length === 0 ? (
               <>
                 Your list is empty. Hover any film and press <strong>+</strong> to save it here.
               </>
@@ -1285,7 +1599,7 @@ export function Browse({
         <DetailModal
           card={open}
           onClose={() => setOpen(null)}
-          onPlay={(tracks) => void play(open.id, false, tracks)}
+          onPlay={(tracks, episodeKey) => void play(open.id, false, tracks, episodeKey)}
           onToggleList={() => void toggleList(open)}
           starting={starting}
         />
