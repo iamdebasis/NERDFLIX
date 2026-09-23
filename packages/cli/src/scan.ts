@@ -7,7 +7,7 @@
  * every downstream stage (ARCHITECTURE.md §12).
  */
 
-import { ingest, MetaStore, scanRoot, syncVolume, VolumeManager, type ScannedTitle } from '@nfl/core';
+import { ingest, MetaStore, scanRoot, VolumeManager, type ScannedTitle } from '@nfl/core';
 import { DB_DIR, VOLUMES_FILE , ensureMigrated } from './paths.js';
 
 const C = {
@@ -159,16 +159,6 @@ async function main() {
         console.log(`${C.dim}skipping ${st.root.label} — offline${C.reset}`);
         continue;
       }
-      // Pull the drive's own metadata in first. On a machine that has never seen this
-      // drive, this is the whole job — the scan below then finds everything unchanged.
-      const sync = await syncVolume(st, store);
-      if (sync && (sync.pulled > 0 || sync.pushed > 0)) {
-        console.log(
-          `  ${C.bold}${st.root.label}${C.reset} ${C.cyan}synced from drive${C.reset} ` +
-            `${C.dim}${sync.pulled} in · ${sync.pushed} out${C.reset}`,
-        );
-      }
-
       process.stderr.write(`${C.dim}scanning ${st.root.label}…${C.reset}\n`);
       const rep = await scanRoot(st.resolvedPath, {
         concurrency: 4,
@@ -195,17 +185,6 @@ async function main() {
           (stats.reprobed ? ` · ${C.cyan}${stats.reprobed} re-probed${C.reset}` : '') +
           (stats.skippedConfirmed ? ` · ${C.dim}${stats.skippedConfirmed} confirmed, left alone${C.reset}` : ''),
       );
-      if (false) {
-        console.log(
-          `    ${C.yellow}drive is read-only — metadata stays local only, so this ` +
-            `library will not travel with the disk${C.reset}`,
-        );
-      } else if (0 > 0) {
-        console.log(
-          `    ${C.dim}${0} written to the drive (.netflix-local) — ` +
-            `plug it into another Mac and it will not need rescanning${C.reset}`,
-        );
-      }
       if (stats.alreadyKnown > 0) {
         console.log(
           `    ${C.cyan}${stats.alreadyKnown} already known${C.reset} ` +

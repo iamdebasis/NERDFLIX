@@ -14,7 +14,6 @@ import {
   MetaStore,
   persistEnvToDataDir,
   TmdbClient,
-  VolumeManager,
   type EnrichOutcome,
 } from '@nfl/core';
 import {
@@ -23,7 +22,6 @@ import {
   DATA_ROOT,
   DB_DIR,
   REPO_ROOT,
-  VOLUMES_FILE,
   ensureMigrated,
 } from './paths.js';
 
@@ -75,10 +73,9 @@ async function main() {
   }
 
   const store = new MetaStore(DB_DIR);
-  const vm = new VolumeManager(VOLUMES_FILE);
   const client = new TmdbClient(token, CACHE_DIR);
 
-  const [{ titles }, states] = await Promise.all([store.loadAll(), vm.probeAll()]);
+  const { titles } = await store.loadAll();
   const country = process.env.NFL_COUNTRY ?? 'IN';
 
   const todo = titles
@@ -96,7 +93,7 @@ async function main() {
   const outcomes: EnrichOutcome[] = [];
   for (const [i, title] of todo.entries()) {
     process.stderr.write(`${C.dim}[${i + 1}/${todo.length}] ${title.title}…${C.reset}\x1b[K\r`);
-    const outcome = await enrichTitle(title, client, states, store, CACHE_DIR, country, {
+    const outcome = await enrichTitle(title, client, store, CACHE_DIR, country, {
       force,
       skipArtwork,
     });

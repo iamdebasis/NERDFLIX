@@ -12,7 +12,6 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   MediaResolver,
-  SIDECAR_DIR,
   episodeSlots,
   type MediaFile,
   type MetaStore,
@@ -104,17 +103,13 @@ export async function buildBrowseData(
     const availability = resolver.resolve(t);
     const media = t.media[0];
 
-    // Artwork paths are stored relative to the drive when they live there, absolute
-    // when they fell back to the local cache. Resolve both to one base directory.
-    const vol = states.find((s) => s.root.id === media?.sightings[0]?.volumeId);
+    // Artwork paths are absolute, into the project's cache; serve from their folder.
     let base: string | null = null;
     const poster = t.artwork.poster;
     // A show's episode stills are served from the same folder as its poster — and from
     // the stills' own folder when TMDB had no poster to download.
     const firstStill = t.episodeInfo.find((i) => i.still)?.still;
-    if (poster?.startsWith(SIDECAR_DIR) && vol?.resolvedPath) {
-      base = join(vol.resolvedPath, SIDECAR_DIR, 'artwork', t.id);
-    } else if (poster) {
+    if (poster) {
       base = join(poster, '..');
     } else if (firstStill) {
       base = dirname(firstStill);

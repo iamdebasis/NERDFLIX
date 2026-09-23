@@ -13,8 +13,6 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Title } from '../schema/index.js';
 import type { MetaStore } from '../store/meta-store.js';
-import type { VolumeState } from '../volumes/manager.js';
-import { SIDECAR_DIR, isWritable, writeTitleToDrive } from '../library/sidecar.js';
 import { decide, scoreCandidate, type MatchScore } from './match.js';
 import {
   imageUrl,
@@ -93,22 +91,16 @@ function showHasUndescribedEpisodes(title: Title): boolean {
   );
 }
 
-/** Where artwork goes: the drive when writable, so it travels with the films. */
-async function artworkDir(
-  titleId: string,
-  volumeStates: VolumeState[],
-  title: Title,
-  localCacheDir: string,
-): Promise<{ dir: string; onDrive: boolean }> {
-  const volumeId = title.media[0]?.sightings[0]?.volumeId;
-  const state = volumeStates.find((s) => s.root.id === volumeId);
-
-  if (state?.resolvedPath && (await isWritable(state.resolvedPath))) {
-    // Artwork always lands in the project's cache. Writing it to the drive was only
-    // ever an optimisation, and one that cannot work on read-only or borrowed media.
-    return { dir: join(localCacheDir, titleId), onDrive: false };
-  }
-  return { dir: join(localCacheDir, 'art', titleId), onDrive: false };
+/**
+ * Where a title's artwork goes: always the project's cache, never the drive.
+ *
+ * This used to depend on whether the film's drive was writable — `<cache>/<id>` for a
+ * writable one, `<cache>/art/<id>` otherwise — a leftover of when artwork was written
+ * TO writable drives. One folder now. Records already pointing at the other keep
+ * working, because the stored path is absolute and browse serves from its folder.
+ */
+function artworkDir(titleId: string, localCacheDir: string): string {
+  return join(localCacheDir, 'art', titleId);
 }
 
 async function download(url: string, target: string): Promise<boolean> {
@@ -345,7 +337,6 @@ async function downloadAll(jobs: Array<() => Promise<void>>, limit = 4): Promise
 async function enrichShow(
   title: Title,
   client: TmdbClient,
-  volumeStates: VolumeState[],
   store: MetaStore,
   localCacheDir: string,
   country: string,
@@ -416,7 +407,7 @@ async function enrichShow(
     }
 
     if (!opts.skipArtwork) {
-      const { dir } = await artworkDir(title.id, volumeStates, title, localCacheDir);
+      const dir = artworkDir(title.id, localCacheDir);
       const artwork: Title['artwork'] = matchNow ? {} : { ...title.artwork };
 
       if (!artwork.poster) {
@@ -483,14 +474,13 @@ async function enrichShow(
 export async function enrichTitle(
   title: Title,
   client: TmdbClient,
-  volumeStates: VolumeState[],
   store: MetaStore,
   localCacheDir: string,
   country: string,
   opts: EnrichOptions = {},
 ): Promise<EnrichOutcome> {
   if (title.type === 'show') {
-    return enrichShow(title, client, volumeStates, store, localCacheDir, country, opts);
+    return enrichShow(title, client, store, localCacheDir, country, opts);
   }
 
   // §7.4: a human correction is never undone by a later automated pass. `auto` with an
@@ -561,20 +551,20 @@ export async function enrichTitle(
     updated.matchWarnings = verdict === 'auto' ? [] : reasons;
 
     if (!opts.skipArtwork) {
-      const { dir, onDrive } = await artworkDir(title.id, volumeStates, title, localCacheDir);
+      const dir = artworkDir(title.id, localCacheDir);
       const poster = pickImage(movie.images?.posters, 'poster');
       const backdrop = pickImage(movie.images?.backdrops, 'backdrop');
       const logo = pickImage(movie.images?.logos, 'logo');
 
       const artwork: Title['artwork'] = {};
       if (poster && (await download(imageUrl(poster, 'w500'), join(dir, 'poster.jpg')))) {
-        artwork.poster = onDrive ? `${SIDECAR_DIR}/artwork/${title.id}/poster.jpg` : join(dir, 'poster.jpg');
+        artwork.poster = join(dir, 'poster.jpg');
       }
       if (backdrop && (await download(imageUrl(backdrop, 'w1280'), join(dir, 'backdrop.jpg')))) {
-        artwork.backdrop = onDrive ? `${SIDECAR_DIR}/artwork/${title.id}/backdrop.jpg` : join(dir, 'backdrop.jpg');
+        artwork.backdrop = join(dir, 'backdrop.jpg');
       }
       if (logo && (await download(imageUrl(logo, 'w500'), join(dir, 'logo.png')))) {
-        artwork.logo = onDrive ? `${SIDECAR_DIR}/artwork/${title.id}/logo.png` : join(dir, 'logo.png');
+        artwork.logo = join(dir, 'logo.png');
       }
       updated = { ...updated, artwork };
     }

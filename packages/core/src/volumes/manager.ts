@@ -7,14 +7,13 @@
  * difference between "it remembers the folder" working and not.
  */
 
-import { watch, type FSWatcher } from 'node:fs';
+import { constants, watch, type FSWatcher } from 'node:fs';
 import { access, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { VolumeStoreSchema, type LibraryRoot } from '../schema/index.js';
-import { readVolumeIdentity, writeVolumeIdentity } from '../library/sidecar.js';
 
 const exec = promisify(execFile);
 
@@ -126,13 +125,18 @@ export function deriveVolumeId(path: string, info: DiskInfo): string {
 
 // --- Store -------------------------------------------------------------------
 
-/** Can we create files here? Decides whether the sidecar cache is usable. */
+/**
+ * Could we write here? Informational only — see `pair`.
+ *
+ * Asked with access(2), NOT by writing a probe file. This used to create and delete
+ * `.nfl-write-test-<pid>` on the drive to find out, which is a write to a drive we
+ * promise never to write to, and it moves the folder's modification time. access()
+ * reports both missing permission and a read-only filesystem (EROFS) without touching
+ * anything.
+ */
 async function isWritable(dir: string): Promise<boolean> {
-  const { writeFile, unlink } = await import('node:fs/promises');
-  const probe = join(dir, `.nfl-write-test-${process.pid}`);
   try {
-    await writeFile(probe, '');
-    await unlink(probe);
+    await access(dir, constants.W_OK);
     return true;
   } catch {
     return false;
@@ -191,19 +195,16 @@ export class VolumeManager {
     const sentinel = await pickSentinel(path);
 
     /**
-     * Identity, in order of trustworthiness:
-     *   1. What the drive itself says. Authoritative and portable — this is what lets
-     *      another Mac (or a friend) pair the same drive and have every `media.volumeId`
-     *      still resolve, instead of the whole library reading as "missing".
-     *   2. A hash of the volume UUID plus the path within it. Portable too, but only
-     *      when the filesystem reports a UUID — exFAT often does not.
-     *   3. A hash of the mount path. Machine-specific, and the case the sidecar exists
-     *      to eliminate.
+     * Identity is derived, never read from or written to the drive: a hash of the
+     * volume UUID plus the path within it, or of the mount path when the filesystem
+     * reports no UUID (exFAT often does not). Deterministic, so re-pairing the same
+     * folder finds the same record. Files themselves are recognised by content
+     * (`contentId`), so nothing needs to be stored on the drive for a library to be
+     * recognised again. An identity file from a pre-release build (`.netflix-local/`)
+     * is ignored; no released version ever wrote one.
      */
-    const recorded = await readVolumeIdentity(path);
-    const id = recorded?.id ?? deriveVolumeId(path, info);
-    const resolvedLabel =
-      label ?? recorded?.label ?? path.split('/').filter(Boolean).pop() ?? path;
+    const id = deriveVolumeId(path, info);
+    const resolvedLabel = label ?? path.split('/').filter(Boolean).pop() ?? path;
 
     /**
      * Nothing is ever written to a scanned drive — not an identity file, not artwork,

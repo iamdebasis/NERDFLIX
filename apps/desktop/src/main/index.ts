@@ -14,7 +14,6 @@ import {
   VolumeManager,
   dataPaths,
   ensureDataDirs,
-  syncAll,
   ingest,
   scanRoot,
   enrichTitle,
@@ -55,12 +54,6 @@ let mainWindow: BrowserWindow | null = null;
 async function buildCards(): Promise<LibraryCard[]> {
   const states = await vm.probeAll();
   lastStates = states;
-
-  // Pull each attached drive's own metadata into the mirror before rendering. On a
-  // machine that has never seen this drive, this is what populates the card without
-  // any scanning at all. Push is off here — the app should not write to a drive just
-  // because someone opened the picker; `pnpm scan` owns that.
-  await syncAll(states, store, { push: false }).catch(() => []);
 
   const { titles } = await store.loadAll();
   const resolver = new MediaResolver(states);
@@ -224,7 +217,6 @@ function registerIpc(): void {
         const outcome = await enrichTitle(
           title,
           client,
-          lastStates,
           store,
           join(PATHS.cacheDir, 'artwork'),
           'US',
@@ -299,10 +291,6 @@ function registerIpc(): void {
     const send = (payload: unknown) =>
       mainWindow?.webContents.send('libraries:scanProgress', payload);
 
-    // Pull the drive's own metadata in first; on a drive scanned elsewhere this is
-    // the whole job and the file walk below finds everything unchanged.
-    await syncAll([state], store).catch(() => []);
-
     const report = await scanRoot(state.resolvedPath, {
       concurrency: 4,
       // The 200 MB feature floor is right for films but wrong for a library of
@@ -334,7 +322,6 @@ function registerIpc(): void {
   ipcMain.handle('library:browse', async (_e, volumeId?: string) => {
     const states = await vm.probeAll();
   lastStates = states;
-    await syncAll(states, store, { push: false }).catch(() => []);
     return buildBrowseData(store, state, states, volumeId);
   });
 

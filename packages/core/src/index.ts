@@ -12,8 +12,6 @@ export * from './scan/scan.js';
 export * from './store/meta-store.js';
 export * from './store/state-store.js';
 export * from './volumes/manager.js';
-export * from './library/sidecar.js';
-export * from './library/sync.js';
 export * from './library/resolver.js';
 export * from './library/episodes.js';
 export * from './enrich/match.js';

@@ -94,7 +94,7 @@ guess.
   Shows/Films tabs. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 423 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 414 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -1077,20 +1077,35 @@ reintroduce a "is this drive mine?" question or a writable-drive special case. B
 existed briefly and produced bugs plus a prompt the user should never have seen.
 Content addressing means a drive needs no marking to be recognised again.
 
-## Portable metadata (drive sidecar)
+## There is no drive sidecar — it was removed, do not bring it back
 
-Title metadata lives in `<libraryRoot>/.netflix-local/` on the drive AND is mirrored
-locally. The drive is the source of truth; the mirror is what lets an unplugged drive
-still render its tiles (§8.5) — metadata that lived only on the drive would disappear
-the moment it was ejected.
+An earlier design kept a copy of each title in `<libraryRoot>/.netflix-local/` so a
+drive would carry its catalogue to another Mac. It contradicted the rule above, and
+when it was removed only half of it went: the app stopped writing artwork there but
+kept READING the folder on every picker load, and both Rescan and `pnpm scan` still
+WROTE title records to any writable drive. What that did, observed on the real library:
 
-`readVolumeIdentity()` is load-bearing: pairing reuses the volume id recorded on the
-drive. If a second machine minted a fresh id, every `media.volumeId` would point at a
-volume it has never heard of and the whole library would resolve as "missing". Never
-generate a new id for a drive that already carries one.
+- **The drive copy was frozen.** It was written once, when a title was first missing
+  there, and never updated.
+- **Its media entries always won the merge**, whatever their age — so a fresh probe
+  was replaced by the frozen one on the next picker load (`probeVersion: 0` after a
+  rescan, reported as "unchanged").
+- **It resurrected deleted data.** Clearing `db/` for a fresh start brought Terminator 3
+  straight back, from a Sep 20 copy whose artwork pointed into `apps/data/` — the
+  directory from the old root-finding bug, which no longer exists.
+- **It was not even portable**: artwork paths are absolute paths on the Mac that wrote
+  them.
 
-NEVER put on the drive: watch history, My List, paired roots, mount paths, cached
-trailers. Handing someone a drive must not hand over your viewing history.
+All of it is gone (`library/sidecar.ts`, `library/sync.ts`, and their callers). Volume
+ids are DERIVED (`deriveVolumeId`: volume UUID + path, or the mount path) and never
+read from the drive; no released build ever wrote an identity file. A `.netflix-local/`
+folder left on a drive by an old build is ignored — dotted, so the scanner skips it —
+and is safe to delete.
+
+Pairing's writability check uses `access(W_OK)`. It used to create and delete a probe
+file, which is a write; the listing afterwards is identical and only the folder's mtime
+gives it away. `no-drive-writes.test.ts` pairs, scans and ingests a real file and
+compares the library's tree INCLUDING mtimes — it fails against the probe.
 
 ## Where user data lives
 
