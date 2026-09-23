@@ -9,8 +9,12 @@
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { z } from 'zod';
 import {
+  EpisodeProgressSchema,
+  ProgressSchema,
   StateFileSchema,
+  TrackChoiceSchema,
   type EpisodeProgress,
   type Progress,
   type StateFile,
@@ -19,6 +23,39 @@ import {
 
 const EMPTY: StateFile = { version: 1, progress: {}, myList: [], thumbs: {}, tracks: {}, episodes: {} };
 
+/** A finite, non-negative number of seconds — the only thing a position may be. */
+function isPosition(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0;
+}
+
+/**
+ * Rebuild a state file entry by entry, keeping everything that validates on its own.
+ * Exported for tests — see `state-safety.test.ts`.
+ */
+export function salvageState(raw: unknown): StateFile {
+  const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: StateFile = structuredClone(EMPTY);
+
+  const keep = <T>(
+    section: unknown,
+    schema: { safeParse: (v: unknown) => { success: true; data: T } | { success: false } },
+    into: Record<string, T>,
+  ) => {
+    if (!section || typeof section !== 'object') return;
+    for (const [key, value] of Object.entries(section as Record<string, unknown>)) {
+      const r = schema.safeParse(value);
+      if (r.success) into[key] = r.data;
+    }
+  };
+
+  keep(src.progress, ProgressSchema, out.progress);
+  keep(src.episodes, EpisodeProgressSchema, out.episodes);
+  keep(src.tracks, TrackChoiceSchema, out.tracks);
+  keep(src.thumbs, z.enum(['up', 'down']), out.thumbs);
+  if (Array.isArray(src.myList)) out.myList = src.myList.filter((id): id is string => typeof id === 'string');
+  return out;
+}
+
 export class StateStore {
   private cache?: StateFile;
   /** Serialises writes so two rapid progress saves cannot interleave. */
@@ -26,16 +63,60 @@ export class StateStore {
 
   constructor(private readonly path: string) {}
 
+  /**
+   * Read state — and never trade the whole file for one bad field.
+   *
+   * This used to start clean on ANY validation failure, and the next write then saved
+   * that clean slate over the file. One entry with a missing position — which a player
+   * reporting an unavailable time-pos produced — silently erased every resume point,
+   * My List and every track choice. `state/` is the one directory nothing regenerates.
+   *
+   * Now: a missing file is a first run. A file that fails validation is copied aside
+   * untouched, then SALVAGED — every entry that validates on its own is kept, and only
+   * the broken ones are dropped. Unparseable JSON is copied aside before starting clean,
+   * so even that is recoverable by hand.
+   */
   async load(): Promise<StateFile> {
     if (this.cache) return this.cache;
+
+    let text: string;
     try {
-      const raw = JSON.parse(await readFile(this.path, 'utf8'));
-      this.cache = StateFileSchema.parse(raw);
+      text = await readFile(this.path, 'utf8');
     } catch {
-      // Missing or corrupt state must never block playback. Start clean.
-      this.cache = structuredClone(EMPTY);
+      this.cache = structuredClone(EMPTY); // no file yet: a first run
+      return this.cache;
     }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      await this.preserve(text, 'unparseable');
+      this.cache = structuredClone(EMPTY);
+      return this.cache;
+    }
+
+    const strict = StateFileSchema.safeParse(raw);
+    if (strict.success) {
+      this.cache = strict.data;
+      return this.cache;
+    }
+
+    await this.preserve(text, 'invalid');
+    this.cache = salvageState(raw);
     return this.cache;
+  }
+
+  /** Keep a byte-for-byte copy of a state file we could not use as-is. */
+  private async preserve(text: string, why: string): Promise<void> {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const copy = `${this.path}.${why}-${stamp}`;
+    try {
+      await writeFile(copy, text, 'utf8');
+      console.warn(`state: ${this.path} was ${why}; original kept at ${copy}`);
+    } catch {
+      /* the copy is a courtesy; failing it must not block playback */
+    }
   }
 
   private async flush(): Promise<void> {
@@ -69,6 +150,8 @@ export class StateStore {
     durationSec: number,
     mediaIndex = 0,
   ): Promise<void> {
+    // The last line of defence: nothing that is not a real position enters state/.
+    if (!isPosition(positionSec) || !isPosition(durationSec)) return;
     const s = await this.load();
     const nearEnd = durationSec > 0 && positionSec / durationSec > 0.97;
     const barelyStarted = positionSec < 120;
@@ -114,6 +197,7 @@ export class StateStore {
     positionSec: number,
     durationSec: number,
   ): Promise<void> {
+    if (!isPosition(positionSec) || !isPosition(durationSec)) return;
     const s = await this.load();
     const now = new Date().toISOString();
     const existing = s.episodes[contentId];

@@ -247,7 +247,10 @@ export class ExternalMpvEngine implements PlaybackEngine {
     await Promise.race([this.ipc.connect(), spawnFailure]);
 
     this.ipc.on('property-change', (msg: MpvPropertyChange) => {
-      this.observers.get(msg.id)?.cb(msg.data);
+      // mpv omits `data` entirely when a property becomes unavailable — as a file
+        // unloads, time-pos does exactly that. Callers are typed for `null`, and an
+        // `undefined` slipping through reached state/ as a missing position.
+        this.observers.get(msg.id)?.cb(msg.data ?? null);
     });
 
     this.startWatchdog();

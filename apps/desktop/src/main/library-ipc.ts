@@ -287,7 +287,7 @@ export function registerPlaybackIpc(deps: Deps): void {
         }
 
         iina.observe('time-pos', (pos) => {
-          if (pos !== null) target.record(pos);
+          if (typeof pos === 'number' && Number.isFinite(pos)) target.record(pos);
         });
 
         return { ok: true };
@@ -416,7 +416,7 @@ export function registerPlaybackIpc(deps: Deps): void {
       }, 5000);
 
       engine.observe('time-pos', (pos) => {
-        if (pos !== null) target.record(pos);
+        if (typeof pos === 'number' && Number.isFinite(pos)) target.record(pos);
       });
 
       return { ok: true };

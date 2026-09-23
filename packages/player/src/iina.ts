@@ -159,7 +159,10 @@ export class IinaEngine implements PlaybackEngine {
         this.ipc = ipc;
 
         ipc.on('property-change', (msg: MpvPropertyChange) => {
-          this.observers.get(msg.id)?.cb(msg.data);
+          // mpv omits `data` entirely when a property becomes unavailable — as a file
+        // unloads, time-pos does exactly that. Callers are typed for `null`, and an
+        // `undefined` slipping through reached state/ as a missing position.
+        this.observers.get(msg.id)?.cb(msg.data ?? null);
         });
         // The socket closing means IINA closed the file — the same signal a bare mpv
         // process exiting gives us, so the app can save progress and refresh.
