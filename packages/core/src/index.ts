@@ -14,6 +14,7 @@ export * from './store/state-store.js';
 export * from './volumes/manager.js';
 export * from './library/resolver.js';
 export * from './library/episodes.js';
+export * from './library/watched.js';
 export * from './enrich/match.js';
 export * from './enrich/tmdb.js';
 export * from './enrich/enrich.js';

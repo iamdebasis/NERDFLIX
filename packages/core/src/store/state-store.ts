@@ -9,6 +9,7 @@
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { WATCHED_FRACTION } from '../library/watched.js';
 import { z } from 'zod';
 import {
   EpisodeProgressSchema,
@@ -26,6 +27,13 @@ const EMPTY: StateFile = { version: 1, progress: {}, myList: [], thumbs: {}, tra
 /** A finite, non-negative number of seconds — the only thing a position may be. */
 function isPosition(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0;
+}
+
+/** Past the credits, or the final 5% when the caller knows of none. */
+function isFinished(positionSec: number, durationSec: number, watchedFromSec?: number): boolean {
+  if (!(durationSec > 0)) return false;
+  const from = isPosition(watchedFromSec) ? watchedFromSec : durationSec * WATCHED_FRACTION;
+  return positionSec >= from;
 }
 
 /**
@@ -158,20 +166,23 @@ export class StateStore {
   /**
    * Record a resume point.
    *
-   * Treats the last 3% as finished, and anything under 2 minutes as not started —
-   * otherwise a title you sampled for ten seconds shows up in "Continue Watching"
-   * forever, and one you finished offers to resume during the credits.
+   * Finished from `watchedFromSec` — where the file's end credits begin, which the
+   * caller reads from its chapters (library/watched.ts) — or the final 5% without one.
+   * Anything under 2 minutes is not started: otherwise a title you sampled for ten
+   * seconds shows up in "Continue Watching" forever, and one you closed at the credits
+   * offers to resume them.
    */
   async setProgress(
     titleId: string,
     positionSec: number,
     durationSec: number,
     mediaIndex = 0,
+    watchedFromSec?: number,
   ): Promise<void> {
     // The last line of defence: nothing that is not a real position enters state/.
     if (!isPosition(positionSec) || !isPosition(durationSec)) return;
     const s = await this.load();
-    const nearEnd = durationSec > 0 && positionSec / durationSec > 0.97;
+    const nearEnd = isFinished(positionSec, durationSec, watchedFromSec);
     const barelyStarted = positionSec < 120;
 
     if (nearEnd) {
@@ -214,12 +225,13 @@ export class StateStore {
     contentId: string,
     positionSec: number,
     durationSec: number,
+    watchedFromSec?: number,
   ): Promise<void> {
     if (!isPosition(positionSec) || !isPosition(durationSec)) return;
     const s = await this.load();
     const now = new Date().toISOString();
     const existing = s.episodes[contentId];
-    const nearEnd = durationSec > 0 && positionSec / durationSec > 0.97;
+    const nearEnd = isFinished(positionSec, durationSec, watchedFromSec);
     const barelyStarted = positionSec < 120;
 
     if (nearEnd) {

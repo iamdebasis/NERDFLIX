@@ -24,6 +24,7 @@ import {
   MediaResolver,
   MetaStore,
   StateStore,
+  watchedFromSec,
   type MediaFile,
   type VolumeState,
 } from '@nfl/core';
@@ -215,13 +216,14 @@ export function registerPlaybackIpc(deps: Deps): void {
         const name = pick.slot.info?.name ?? a.media.episodeTitle;
         const contentId = a.media.contentId;
         const duration = a.media.durationSec;
+        const finishedFrom = watchedFromSec(duration, a.media.chapters);
         target = {
           absolutePath: a.absolutePath,
           media: a.media,
           startAt: fromStart ? undefined : pick.resumeSec,
           // "Breaking Bad — S1:E4 · Cancer Man", in the OSC and the window title.
           displayTitle: `${title.title} — ${episodeLabel(pick.slot)}${name ? ` · ${name}` : ''}`,
-          record: (pos) => void deps.state.setEpisodeProgress(id, contentId, pos, duration),
+          record: (pos) => void deps.state.setEpisodeProgress(id, contentId, pos, duration, finishedFrom),
         };
       } else {
         const availability = resolver.resolve(title, versionIndex);
@@ -234,12 +236,13 @@ export function registerPlaybackIpc(deps: Deps): void {
         }
         const progress = fromStart ? null : await deps.state.getProgress(id);
         const duration = availability.media.durationSec;
+        const finishedFrom = watchedFromSec(duration, availability.media.chapters);
         target = {
           absolutePath: availability.absolutePath,
           media: availability.media,
           startAt: progress?.positionSec,
           displayTitle: `${title.title}${title.year ? ` (${title.year})` : ''}`,
-          record: (pos) => void deps.state.setProgress(id, pos, duration, versionIndex),
+          record: (pos) => void deps.state.setProgress(id, pos, duration, versionIndex, finishedFrom),
         };
       }
 
