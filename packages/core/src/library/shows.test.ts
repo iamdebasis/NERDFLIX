@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -204,6 +204,106 @@ describe('TV ingest', () => {
       await scan();
       const [show] = await shows(store);
       assert.equal((await store.get(show.id))?.type, 'show');
+    });
+  });
+});
+
+/**
+ * A file already in the library, read differently now — renamed, or read by a parser
+ * that learned something. It is still found by content, in the record it was first
+ * filed under; these pin that it moves to where it now belongs.
+ */
+describe('re-filing a known file whose reading changed', () => {
+  const EPISODE = 'Tom and Jerry - S1940E01 - Puss Gets The Boot.mkv';
+
+  test('a file stored as a film moves into its show, keeping every drive it was seen on', async () => {
+    await withLibrary(async ({ root, store, scan }) => {
+      await video(root, 'Puss.Gets.The.Boot.1940.mkv');
+      await scan();
+      const [film] = await films(store);
+      assert.ok(film, 'precondition: it was filed as a film');
+      // Seen on a second drive too — that must survive the move.
+      film.media[0].sightings.push({ volumeId: 'vol-other', relPath: 'x/Puss.mkv', fingerprint: 'f', lastSeen: '2026-01-01T00:00:00Z' });
+      await store.save(film);
+
+      await rename(join(root, 'Puss.Gets.The.Boot.1940.mkv'), join(root, EPISODE));
+      const stats = await scan();
+
+      assert.equal(stats.reclassified, 1);
+      assert.equal((await films(store)).length, 0, 'the emptied film record was left behind');
+      const [show] = await shows(store);
+      assert.equal(show.title, 'Tom and Jerry');
+      assert.deepEqual(numbering(show), ['S1940E1']);
+      assert.equal(show.media[0].contentId, film.media[0].contentId, 'the same file, not a new one');
+      assert.deepEqual(
+        show.media[0].sightings.map((x) => x.volumeId).sort(),
+        ['vol-other', 'vol-test'],
+        'the other drive was forgotten',
+      );
+    });
+  });
+
+  test('a film with two versions keeps the one that is still a film', async () => {
+    await withLibrary(async ({ root, store, scan }) => {
+      await video(root, 'Heat.1995.Theatrical.Cut.1080p.mkv');
+      await video(root, 'Heat.1995.Directors.Cut.1080p.mkv');
+      await scan();
+      assert.equal((await films(store))[0]?.media.length, 2, 'precondition: one film, two versions');
+
+      await rename(join(root, 'Heat.1995.Directors.Cut.1080p.mkv'), join(root, 'Heat.S01E01.1080p.mkv'));
+      await scan();
+      const [film] = await films(store);
+      assert.equal(film.media.length, 1);
+      assert.equal(film.media[0].season, undefined);
+      assert.equal((await shows(store)).length, 1);
+    });
+  });
+
+  test('the reverse: an episode that now reads as a film leaves its show', async () => {
+    await withLibrary(async ({ root, store, scan }) => {
+      await video(root, 'Heat.S01E01.1080p.mkv');
+      await scan();
+      await rename(join(root, 'Heat.S01E01.1080p.mkv'), join(root, 'Heat.1995.1080p.mkv'));
+      const stats = await scan();
+
+      assert.equal(stats.reclassified, 1);
+      assert.equal((await shows(store)).length, 0);
+      const [film] = await films(store);
+      assert.equal(film.id, 'heat-1995');
+      assert.equal(film.media[0].season, undefined, 'a film kept its old episode numbering');
+    });
+  });
+
+  test('a title the user confirmed stays exactly where they left it', async () => {
+    await withLibrary(async ({ root, store, scan }) => {
+      await video(root, 'Puss.Gets.The.Boot.1940.mkv');
+      await scan();
+      const [film] = await films(store);
+      await store.save({ ...film, matchState: 'confirmed' });
+
+      await rename(join(root, 'Puss.Gets.The.Boot.1940.mkv'), join(root, EPISODE));
+      const stats = await scan();
+
+      assert.equal(stats.reclassified, 0);
+      assert.equal(stats.skippedConfirmed, 1);
+      assert.equal((await films(store)).length, 1);
+      assert.equal((await shows(store)).length, 0);
+    });
+  });
+
+  test('a reading that could not be filed does not pull an episode out of its show', async () => {
+    await withLibrary(async ({ root, store, scan }) => {
+      await mkdir(join(root, 'Chernobyl.S01.2160p-GRP'), { recursive: true });
+      await video(root, 'Chernobyl.S01.2160p-GRP/Chernobyl.S01E01.2160p-GRP.mkv');
+      await scan();
+      // Now named like a season pack with no episode number: unplaced TV, skipped.
+      await rename(
+        join(root, 'Chernobyl.S01.2160p-GRP/Chernobyl.S01E01.2160p-GRP.mkv'),
+        join(root, 'Chernobyl.S01.2160p-GRP/Chernobyl.S01.2160p.BluRay.REMUX-GRP.mkv'),
+      );
+      const stats = await scan();
+      assert.equal(stats.reclassified, 0);
+      assert.equal((await shows(store))[0]?.media.length, 1, 'the episode was lost');
     });
   });
 });

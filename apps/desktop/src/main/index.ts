@@ -313,6 +313,8 @@ function registerIpc(): void {
       unchanged: stats.unchanged,
       moved: stats.relocated,
       alreadyKnown: stats.alreadyKnown,
+      episodesAdded: stats.episodesAdded,
+      reclassified: stats.reclassified,
       missing: stats.missing.map((m) => ({ title: m.title, relPath: m.relPath })),
       pruned: stats.pruned,
       elapsedMs: report.elapsedMs,

@@ -17,7 +17,7 @@ import { relative } from 'node:path';
 import type { ScanReport, ScannedTitle } from '../scan/scan.js';
 import { PROBE_VERSION } from '../scan/probe.js';
 import type { EpisodeRef } from '../scan/episode.js';
-import { normalizeTitle } from '../scan/parse.js';
+import { normalizeTitle, type ParsedRelease } from '../scan/parse.js';
 import type { LibraryRoot, MediaFile, Sighting, Title } from '../schema/index.js';
 import { makeSlug, makeSortTitle, MetaStore } from '../store/meta-store.js';
 
@@ -44,6 +44,11 @@ export type IngestStats = {
   editionsAdded: number;
   /** Episodes that joined a show already in the library. */
   episodesAdded: number;
+  /**
+   * Known files moved to the other KIND of title because they now read differently —
+   * stored as a film, now an episode, or the reverse. See `misfiled`.
+   */
+  reclassified: number;
   skippedConfirmed: number;
   /**
    * Files deliberately not catalogued, with the reason. Reported rather than turned
@@ -153,6 +158,32 @@ function applyEpisode(media: MediaFile, ep: EpisodeRef): void {
   media.episodeTitle = ep.episodeTitle;
 }
 
+/** A film's media carries no numbering — including one that used to be an episode. */
+function clearEpisode(media: MediaFile): void {
+  delete media.season;
+  delete media.episode;
+  delete media.episodeEnd;
+  delete media.episodeTitle;
+}
+
+/**
+ * Is a known file stored as the wrong KIND of title for what it now reads as?
+ *
+ * Identity is content, so a file the parser now reads differently — because it was
+ * renamed, or because the parser learned something (`S1940E01` was once unreadable,
+ * and 46 Tom and Jerry cartoons sat in the library as 46 "films") — is still found by
+ * its contentId, in the record it was first filed under. Without this it would stay
+ * there for ever: a rescan only refreshed numbering on files already under a show.
+ *
+ * Only a READING that could be filed counts. An episode with no series, or TV with no
+ * placeable episode, is skipped by the new-file path — moving one out of its show
+ * just to skip it would lose it.
+ */
+function misfiled(title: Title, parsed: ParsedRelease): boolean {
+  if (title.type === 'movie') return Boolean(parsed.episode?.series);
+  return !parsed.episode && !parsed.warnings.includes('tv-without-episode');
+}
+
 /**
  * A show's id. The `show-` prefix is not decoration: ids are global — the renderer, the
  * trailer player and `state/` all key on them — and a show and a film can share a name.
@@ -223,6 +254,7 @@ export async function ingest(
     alreadyKnown: 0,
     editionsAdded: 0,
     episodesAdded: 0,
+    reclassified: 0,
     skippedConfirmed: 0,
     skipped: [],
     missing: [],
@@ -248,7 +280,7 @@ export async function ingest(
   const seenHere = new Set<string>();
 
   for (const scanned of report.titles) {
-    const media = toMediaFile(scanned, root, rootPath);
+    let media = toMediaFile(scanned, root, rootPath);
     if (!media) continue;
 
     const sighting = media.sightings[0];
@@ -259,15 +291,6 @@ export async function ingest(
       // Identical content means identical technical facts, so normally there is
       // nothing to update on the media entry — only where it now lives.
       const how = noteSighting(known.media, sighting);
-      if (how === 'moved') stats.relocated += 1;
-      else if (how === 'new') stats.alreadyKnown += 1;
-      else stats.unchanged += 1;
-
-      // Numbering comes from the name, and the name — or the parser — may have changed
-      // since. Identical bytes are no reason to keep a stale S/E.
-      if (known.title.type === 'show' && scanned.parsed.episode) {
-        applyEpisode(known.media, scanned.parsed.episode);
-      }
 
       /**
        * Unless WE have changed.
@@ -285,8 +308,42 @@ export async function ingest(
         stats.reprobed += 1;
       }
 
-      await store.save(known.title);
-      continue;
+      const wrongKind = misfiled(known.title, scanned.parsed);
+      // §7.4: a title the user confirmed by hand is left exactly as they left it.
+      if (wrongKind && known.title.matchState === 'confirmed') stats.skippedConfirmed += 1;
+
+      if (!wrongKind || known.title.matchState === 'confirmed') {
+        if (how === 'moved') stats.relocated += 1;
+        else if (how === 'new') stats.alreadyKnown += 1;
+        else stats.unchanged += 1;
+
+        // Numbering comes from the name, and the name — or the parser — may have
+        // changed since. Identical bytes are no reason to keep a stale S/E.
+        if (known.title.type === 'show' && scanned.parsed.episode) {
+          applyEpisode(known.media, scanned.parsed.episode);
+        }
+        await store.save(known.title);
+        continue;
+      }
+
+      // Re-file it: out of the old title — gone entirely if that was its last file —
+      // and on through the new-file path below as what it now reads as. The KNOWN
+      // entry travels, not the fresh one, because it carries every drive the file has
+      // been seen on; the fresh one knows only this one.
+      const old = known.title;
+      old.media = old.media.filter((m) => m !== known.media);
+      byContent.delete(known.media.contentId);
+      if (old.media.length === 0) {
+        await store.delete(old.id, old.type);
+        byId.delete(old.id);
+        if (old.externalIds.imdbId && byImdb.get(old.externalIds.imdbId) === old) {
+          byImdb.delete(old.externalIds.imdbId);
+        }
+      } else {
+        await store.save(old);
+      }
+      media = known.media;
+      stats.reclassified += 1;
     }
 
     const { parsed, externalIds } = scanned;
@@ -355,6 +412,7 @@ export async function ingest(
     }
 
     // --- a film --------------------------------------------------------------
+    clearEpisode(media);
     const type = 'movie' as const;
     const id = makeSlug(parsed.title || scanned.unit.releaseName, parsed.year);
     const byIdFilm = byId.get(id);

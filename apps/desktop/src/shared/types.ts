@@ -151,6 +151,10 @@ export type ScanResult = {
   moved: number;
   /** Known content seen here for the first time, e.g. copied from another drive. */
   alreadyKnown: number;
+  /** Episodes that joined a show already in the library — a new season, say. */
+  episodesAdded: number;
+  /** Known files re-filed because they now read as the other kind: film ↔ episode. */
+  reclassified: number;
   /** Files in the database that are no longer on the drive. */
   missing: Array<{ title: string; relPath: string }>;
   pruned: number;

@@ -55,6 +55,20 @@ function ScanBar({ done, total }: { done: number; total: number }) {
 const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`);
 
 /**
+ * "1 new · 45 episodes added", or "Up to date". Episodes joining a show you already
+ * have are not "new" titles, and a scan that added a season read as a no-op without
+ * them.
+ */
+function scanHeadline(r: ScanResult): string {
+  const parts = [
+    r.created > 0 ? `${r.created} new` : null,
+    r.episodesAdded > 0 ? `${r.episodesAdded} ${plural(r.episodesAdded, 'episode')} added` : null,
+    r.moved > 0 ? `${r.moved} moved` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' \u00b7 ') : 'Up to date';
+}
+
+/**
  * "58 films · 4 shows", or just one of them. A series with forty episodes is one show:
  * counting its files would call it forty films.
  */
@@ -140,7 +154,9 @@ export function LibraryPicker({
 
       // Straight into artwork. A library of grey rectangles is not worth looking at,
       // and making that a separate step people have to know about is a poor default.
-      if (r.created > 0 || r.alreadyKnown > 0) {
+      // New episodes of a show you already have count: `created` stays 0 for them, and
+      // they sat with no names or stills until something else triggered a pass.
+      if (r.created > 0 || r.alreadyKnown > 0 || r.episodesAdded > 0 || r.reclassified > 0) {
         const e = await window.libraries.enrich();
         setNeedsToken(e.skipped === 'no-token');
         await refresh();
@@ -253,12 +269,7 @@ export function LibraryPicker({
               key: 'result',
               node: (
                 <div className="scan-result">
-                  <strong>
-                    {result.r.created > 0 && `${result.r.created} new`}
-                    {result.r.created > 0 && result.r.moved > 0 && ' \u00b7 '}
-                    {result.r.moved > 0 && `${result.r.moved} moved`}
-                    {result.r.created === 0 && result.r.moved === 0 && 'Up to date'}
-                  </strong>
+                  <strong>{scanHeadline(result.r)}</strong>
                   <span>
                     {result.r.unchanged} unchanged {'\u00b7'}{' '}
                     {(result.r.elapsedMs / 1000).toFixed(1)}s

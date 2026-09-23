@@ -179,6 +179,8 @@ async function main() {
           // An episode joining a show is neither "new" (no title was created) nor
           // "unchanged" — without this a scan that added a season read as a no-op.
           (stats.episodesAdded ? ` · ${C.cyan}${stats.episodesAdded} episodes added${C.reset}` : '') +
+          // A known file that now reads as the other kind — film ↔ episode — moved records.
+          (stats.reclassified ? ` · ${C.cyan}${stats.reclassified} re-filed${C.reset}` : '') +
           (stats.skipped.length ? ` · ${C.yellow}${stats.skipped.length} skipped${C.reset}` : '') +
           // Otherwise a re-probe is invisible, and "unchanged" would be a lie about
           // records that were just rewritten.
