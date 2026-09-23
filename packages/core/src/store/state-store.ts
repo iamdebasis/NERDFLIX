@@ -58,6 +58,12 @@ export function salvageState(raw: unknown): StateFile {
 
 export class StateStore {
   private cache?: StateFile;
+  /**
+   * The first load, shared by everyone who asks while it is in flight. Without it two
+   * callers at startup each parsed the file into a SEPARATE object, the second replaced
+   * the first as the cache, and anything written through the first was lost.
+   */
+  private loading?: Promise<StateFile>;
   /** Serialises writes so two rapid progress saves cannot interleave. */
   private writeChain: Promise<void> = Promise.resolve();
 
@@ -78,13 +84,19 @@ export class StateStore {
    */
   async load(): Promise<StateFile> {
     if (this.cache) return this.cache;
+    this.loading ??= this.readState().then((state) => {
+      this.cache = state;
+      return state;
+    });
+    return this.loading;
+  }
 
+  private async readState(): Promise<StateFile> {
     let text: string;
     try {
       text = await readFile(this.path, 'utf8');
     } catch {
-      this.cache = structuredClone(EMPTY); // no file yet: a first run
-      return this.cache;
+      return structuredClone(EMPTY); // no file yet: a first run
     }
 
     let raw: unknown;
@@ -92,20 +104,26 @@ export class StateStore {
       raw = JSON.parse(text);
     } catch {
       await this.preserve(text, 'unparseable');
-      this.cache = structuredClone(EMPTY);
-      return this.cache;
+      return this.persistRepaired(structuredClone(EMPTY));
     }
 
     const strict = StateFileSchema.safeParse(raw);
-    if (strict.success) {
-      this.cache = strict.data;
-      return this.cache;
-    }
+    if (strict.success) return strict.data;
 
     await this.preserve(text, 'invalid');
-    this.cache = salvageState(raw);
-    return this.cache;
+    return this.persistRepaired(salvageState(raw));
   }
+
+  /**
+   * Write a repaired state straight back, so the file is valid again. Otherwise every
+   * launch until the next ordinary write re-salvaged and left another backup copy.
+   */
+  private async persistRepaired(state: StateFile): Promise<StateFile> {
+    this.cache = state;
+    await this.queueWrite();
+    return state;
+  }
+
 
   /** Keep a byte-for-byte copy of a state file we could not use as-is. */
   private async preserve(text: string, why: string): Promise<void> {

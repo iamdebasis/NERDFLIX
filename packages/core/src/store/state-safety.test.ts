@@ -148,3 +148,28 @@ describe('a bad entry never costs the whole file', () => {
     assert.deepEqual(s.progress, {});
   });
 });
+
+describe('startup', () => {
+  test('two loads at once share ONE state — a write through either is kept', async () => {
+    await withDir(async (dir) => {
+      const path = join(dir, 'progress.json');
+      await writeFile(path, JSON.stringify({ version: 1, progress: {}, myList: ['a'], thumbs: {} }));
+      const s = new StateStore(path);
+      const [x, y] = await Promise.all([s.load(), s.load()]);
+      assert.equal(x, y, 'two separate state objects — one of them loses its writes');
+    });
+  });
+
+  test('a salvaged file is written back valid, so the next launch does not salvage again', async () => {
+    await withDir(async (dir) => {
+      const path = join(dir, 'progress.json');
+      await writeFile(path, JSON.stringify(OBSERVED_CORRUPTION));
+      await new StateStore(path).load();
+
+      assert.ok(StateFileSchema.safeParse(JSON.parse(await readFile(path, 'utf8'))).success);
+      await new StateStore(path).load();
+      const copies = (await readdir(dir)).filter((f) => f.includes('.invalid-'));
+      assert.equal(copies.length, 1, 'every launch left another backup');
+    });
+  });
+});
