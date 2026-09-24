@@ -238,7 +238,27 @@ describe('a year-numbered show TMDB lists as films', () => {
     });
   });
 
-  test('an older derivation is refreshed from cache, without a search', async () => {
+  test('an episode not found before is searched ONCE more under a newer derivation', async () => {
+    await withStore(async (store, dir) => {
+      const first = fakeTmdb();
+      await enrichTitle(tomAndJerry(), first.client, store, dir, 'US', { skipArtwork: true });
+      const done = (await store.get('show-tom-and-jerry'))!;
+      assert.equal(done.episodeInfo.find((i) => i.episode === 46)?.tmdbId, undefined, 'precondition: not found');
+
+      // An older derivation: the not-found episode is looked for again, and only it.
+      const stale = { ...done, derivedVersion: DERIVE_VERSION - 1 };
+      const again = fakeTmdb();
+      await enrichTitle(stale, again.client, store, dir, 'US', { skipArtwork: true });
+      assert.equal(again.calls.searchMovie, 1, 'matched episodes were searched again');
+
+      // And under the current one it rests: no search every scan.
+      const third = fakeTmdb();
+      await enrichTitle((await store.get('show-tom-and-jerry'))!, third.client, store, dir, 'US', { skipArtwork: true });
+      assert.equal(third.calls.searchMovie, 0);
+    });
+  });
+
+  test('an older derivation refreshes MATCHED episodes from cache — never TV, never a re-match', async () => {
     await withStore(async (store, dir) => {
       const first = fakeTmdb();
       await enrichTitle(tomAndJerry(), first.client, store, dir, 'US', { skipArtwork: true });
@@ -246,7 +266,15 @@ describe('a year-numbered show TMDB lists as films', () => {
       assert.equal(needsEnrichment(stale), true);
       const again = fakeTmdb();
       await enrichTitle(stale, again.client, store, dir, 'US', { skipArtwork: true });
-      assert.deepEqual([again.calls.searchTv, again.calls.searchMovie], [0, 0]);
+      // One search, and only for the one episode never found (episode 46): the five that
+      // matched come from their cached films and are not searched for again (§7.4).
+      assert.deepEqual([again.calls.searchTv, again.calls.searchMovie], [0, 1]);
+      const after = (await store.get('show-tom-and-jerry'))!;
+      assert.deepEqual(
+        after.episodeInfo.filter((i) => i.tmdbId).map((i) => i.tmdbId),
+        stale.episodeInfo.filter((i) => i.tmdbId).map((i) => i.tmdbId),
+        'a matched episode changed its film',
+      );
     });
   });
 

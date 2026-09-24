@@ -238,6 +238,27 @@ describe('series numbered by year', () => {
     assert.equal(looksLikeFeature('Some.Short.Film.1940.mkv', 60 * 1024 * 1024), false);
   });
 
+  test('a decomposed name off a macOS disk comes out composed — TMDB cannot search the other', () => {
+    // The real case: "Touché" stored as "e" + U+0301, which looks identical and is not.
+    const nfd = 'Tom and Jerry - S1950E43 - Touché, Pussy Cat!'.normalize('NFD');
+    const pack = 'Tom and Jerry - Season 1950 Complete 1080p WEB x264 [i_c]'.normalize('NFD');
+    assert.notEqual(nfd, nfd.normalize('NFC'), 'precondition: the fixture really is decomposed');
+    const e = parseEpisode(nfd, [pack]);
+    assert.equal(e?.episodeTitle, 'Touché, Pussy Cat!'.normalize('NFC'));
+    assert.equal(parseRelease(nfd, [pack]).episode?.episodeTitle, 'Touché, Pussy Cat!'.normalize('NFC'));
+  });
+
+  test('a decomposed folder and a composed file name the same show', () => {
+    const e = parseEpisode('S01E01', ['Pokémon'.normalize('NFD'), 'Season 1']);
+    assert.equal(e?.series, 'Pokémon'.normalize('NFC'));
+  });
+
+  test('a decomposed film title comes out composed too', () => {
+    const t = parseRelease('Amélie.2001.1080p.BluRay.x264-GRP'.normalize('NFD')).title;
+    assert.equal(t, t.normalize('NFC'));
+    assert.match(t, /Amélie/);
+  });
+
   test('labels keep the season as the file names it', () => {
     assert.equal(episodeLabel({ season: 1940, episode: 1 }), 'S1940:E1');
   });

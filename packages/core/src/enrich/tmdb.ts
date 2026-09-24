@@ -120,6 +120,16 @@ export type TmdbSeason = {
 
 export class TmdbError extends Error {}
 
+/**
+ * Every search goes out COMPOSED. TMDB returns nothing for decomposed Unicode — "Touché"
+ * as "e" plus a combining accent, as names read off a macOS disk often are — and the
+ * parser composing new names does not help titles already stored. One place, so no
+ * caller can forget.
+ */
+export function searchText(query: string): string {
+  return query.normalize('NFC');
+}
+
 export class TmdbClient {
   constructor(
     private readonly token: string,
@@ -154,7 +164,7 @@ export class TmdbClient {
   }
 
   async searchMovie(query: string, year?: number): Promise<TmdbCandidate[]> {
-    const params: Record<string, string> = { query, include_adult: 'false' };
+    const params: Record<string, string> = { query: searchText(query), include_adult: 'false' };
     if (year) params.primary_release_year = String(year);
     const data = await this.request<{ results?: TmdbCandidate[] }>('/search/movie', params);
     return data.results ?? [];
@@ -184,7 +194,7 @@ export class TmdbClient {
   // --- TV -----------------------------------------------------------------------
 
   async searchTv(query: string, year?: number): Promise<TmdbShowCandidate[]> {
-    const params: Record<string, string> = { query, include_adult: 'false' };
+    const params: Record<string, string> = { query: searchText(query), include_adult: 'false' };
     if (year) params.first_air_date_year = String(year);
     const data = await this.request<{ results?: TmdbShowCandidate[] }>('/search/tv', params);
     return data.results ?? [];

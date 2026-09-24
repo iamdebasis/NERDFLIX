@@ -34,7 +34,12 @@ import type { EpisodeInfo, SeasonInfo } from '../schema/index.js';
  * pass — free, because the response is on disk, and safe, because re-deriving is not
  * re-matching (§7.4).
  */
-export const DERIVE_VERSION = 2; // 2: a poster per season, for the show's shelf of season cards
+/*
+ * 2: a poster per season, for the show's shelf of season cards — and an episode an
+ *    older derivation looked for and did not find is searched ONCE more, because its
+ *    title may have gone out as decomposed Unicode, which TMDB cannot read.
+ */
+export const DERIVE_VERSION = 2;
 
 export type EnrichOutcome = {
   titleId: string;
@@ -459,7 +464,10 @@ async function enrichShorts(
     await downloadAll(
       slots.map((slot) => async () => {
         const before = title.episodesAsFilms ? prior.get(slot.key) : undefined;
-        if (before && !opts.force) {
+        // Matched: re-derive from cache. Not found: left alone — except once under a
+        // newer derivation, which may search better than the one that gave up.
+        const settled = before && (before.tmdbId !== undefined || title.derivedVersion >= DERIVE_VERSION);
+        if (before && settled && !opts.force) {
           picks.set(slot.key, before.tmdbId ? await client.movieDetails(before.tmdbId) : null);
           return;
         }

@@ -95,7 +95,7 @@ guess.
   Jerry shorts) are described episode by episode. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 473 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 479 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -475,6 +475,15 @@ for such a show, and one year-numbered season reads "46 Episodes", not "Season 1
 Verified against live TMDB with the real pack's 46 filenames and durations: 46 of 46
 matched, all stills downloaded, and the matched release dates came back in episode order
 (1940-02-10 … 1949-12-10) — an independent check nothing was mismatched.
+
+**Names are composed Unicode (NFC) before anything reads them.** macOS often returns
+filenames DECOMPOSED — "é" as "e" + a combining accent — and TMDB's search returns
+nothing for that form: "Touché, Pussy Cat!" and "Tom And Chérie" matched nothing on the
+real drive while the same titles typed normally matched at once. `parseRelease` and
+`parseEpisode` compose their input, and `searchText` in tmdb.ts composes every query in
+the one place all searches pass through, which also covers titles stored before. An
+episode an older derivation could not find is searched ONCE more under a newer one
+(DERIVE_VERSION 2); otherwise "not found" is final, or every scan would re-search it.
 
 **New episodes trigger enrichment.** The picker used to enrich only when a title was
 CREATED, so a new season joining an existing show sat with no names or stills. Scan

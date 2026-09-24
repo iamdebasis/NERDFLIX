@@ -262,7 +262,14 @@ function sanitizeTitle(
  * ignore them; an episode needs them when its own name does not say which show it is.
  */
 export function parseRelease(rawName: string, folders: readonly string[] = []): ParsedRelease {
-  const cleaned = cleanReleaseName(rawName);
+  /*
+   * Names off a disk can be DECOMPOSED Unicode — "é" stored as "e" plus a combining
+   * accent, which is how macOS often writes them. It looks identical and is not: TMDB's
+   * search finds nothing for it (Touché, Pussy Cat! and Tom And Chérie matched nothing
+   * until this), and a show folder and its files could disagree about their own name.
+   * Everything read from a name is composed first.
+   */
+  const cleaned = cleanReleaseName(rawName.normalize('NFC'));
   const episode = parseEpisode(cleaned, folders) ?? undefined;
   const isShow = episode !== undefined;
 

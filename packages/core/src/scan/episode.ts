@@ -214,7 +214,10 @@ function readContinuation(after: string, first: number): { end?: number; consume
  * `folders` are the directories containing the file, from the library root down, and
  * supply the series and season when the name itself does not.
  */
-export function parseEpisode(name: string, folders: readonly string[] = []): EpisodeRef | null {
+export function parseEpisode(rawName: string, rawFolders: readonly string[] = []): EpisodeRef | null {
+  // Composed, as in parse.ts: a decomposed "é" is invisible here and fatal to a search.
+  const name = rawName.normalize('NFC');
+  const folders = rawFolders.map((f) => f.normalize('NFC'));
   const parent = folders.length ? folders[folders.length - 1] : '';
   const parentSeason = parent ? seasonFromFolder(parent) : null;
 
