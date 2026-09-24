@@ -91,10 +91,11 @@ guess.
   creator/cast, My List, Continue Watching with progress bars.
 - **TV shows** — episodes recognised and grouped into shows, TMDB series/season/episode
   metadata and stills, episode list with seasons, next-up, per-episode resume, and
-  Shows/Films tabs. See §"TV shows".
+  Shows/Films tabs. Year-numbered series TMDB lists only as films (the classic Tom and
+  Jerry shorts) are described episode by episode. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 414 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 461 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -145,8 +146,7 @@ see §"Playback: mpv owns its own window" for the three structural reasons a tra
 overlay cannot work. The only correct fix is libmpv rendering inside Chromium via a
 native addon (`electron-mpv-video`). Do not rebuild the overlay.
 
-**3. Not built, in rough priority order:** next-episode autoplay (Play already knows
-which episode is next; nothing starts it when one ends), trailers (yt-dlp cache), scrub-preview
+**3. Not built, in rough priority order:** trailers (yt-dlp cache), scrub-preview
 thumbnails (needs the thumbfast pattern — a second hidden mpv instance; a pre-generated
 sprite sheet is impossible on an 80 GB file), Skip Intro from chapter markers, a review
 queue for titles TMDB matched wrongly, and the derived SQLite index (deliberately
@@ -386,6 +386,74 @@ seasons and artwork are dropped rather than left describing the wrong series.
 
 `MIN_EPISODE_BYTES` (20 MB) replaces the feature floor for files with an `SxxEyy`
 marker: a half-hour SDR episode is far smaller than any film remux.
+
+**Decided by the user, 2026-09-24 — not deferred, do not build:**
+- **No autoplay or continuous play.** Clicking an episode plays exactly that episode and
+  nothing starts after it. The show-level Play button still picks next-up — that is a
+  choice made when pressing Play, not playback continuing on its own.
+- **No missing or greyed-out episodes.** The list shows what is on your drives,
+  precisely. The one mention of the rest is the "8 of 10 episodes on your drives" line.
+
+**A season can be a year** (`S1940E01`, `Season 1940/`). The classic Tom and Jerry
+shorts ship that way and were 46 unmatched "films". Years are accepted only in explicit
+context — an `SxxxxEyy` marker, a folder named exactly for the season, a season-pack
+folder — and NOT in parse.ts's `UNPLACED_TV`, where `Open.Season.2006` would have been
+skipped as TV. `junk.ts` asks `hasEpisodeMarker` rather than keeping its own regex; the
+marker lived in three places and they must not drift.
+
+**A known file lives where its current reading says** (`misfiled` in ingest.ts). Found
+by contentId in the record it was first filed under, a file that now reads as the other
+kind — renamed, or read by a parser that learned something — is re-filed: out of the
+old record (deleted if emptied) and through the normal new-file path, carrying the KNOWN
+media entry because it holds every drive the file was seen on. Never for a confirmed
+title, and never for a reading that cannot be filed (TV with no episode number), which
+would pull an episode out of its show only to skip it.
+
+**A series TMDB lists as films** (`episodesAsFilms`, enrich/shorts.ts). TMDB has no
+series for the classic cartoons; each is a film. Three rules, each load-bearing:
+- **The year guard** (`couldHaveSeasons`): a series cannot have episodes numbered by a
+  year before it first aired. Without it, TMDB's only series named exactly "Tom and
+  Jerry" — begun in 2023 — is an AUTOMATIC match: perfect name, no year, no rival.
+  `shorts.test.ts` fails four ways when the guard is removed.
+- **A TV match must have the year seasons on disk**, unless confirmed. Otherwise the
+  show is described from films.
+- **Which film an episode is:** near-exact title, released within the season's span
+  (`SEASON_SPAN_YEARS` — a year season may be one year or a decade; Season 1940 runs to
+  1949), runtime agreeing with the file. Two still fitting — the 1941 and 1946 "The Night
+  Before Christmas" — go to whichever was made by the directors most of the series
+  shares (`seriesMakers`, needs 3+ matched films); otherwise neither.
+
+A matched episode stores its film's `tmdbId`, so later passes re-derive from the cached
+details and never search again. One not found is stored with an empty name and no id,
+recording that it was looked for — without that, every scan re-searched it; the list
+falls back to the filename's title. Series-level facts are derived from the films (the
+years they span, common genres, shared directors as creators). No synopsis is invented,
+no studio is printed as a "Network", the detail view omits "No description available."
+for such a show, and one year-numbered season reads "46 Episodes", not "Season 1940".
+
+Verified against live TMDB with the real pack's 46 filenames and durations: 46 of 46
+matched, all stills downloaded, and the matched release dates came back in episode order
+(1940-02-10 … 1949-12-10) — an independent check nothing was mismatched.
+
+**New episodes trigger enrichment.** The picker used to enrich only when a title was
+CREATED, so a new season joining an existing show sat with no names or stills. Scan
+results carry `episodesAdded` and `reclassified`; either triggers it, and the headline
+reads "1 new · 45 episodes added".
+
+## Watched means reaching the credits
+
+People close the player when the credits start, and with no autoplay that is how every
+episode ends. The old rule (the final 3%) sat inside the credits of nearly everything:
+of the 15 films with chapters in the real library, 11 name an end-credits chapter, all
+starting between 93.0% and 96.4%. A film closed at its credits stayed "in progress" for
+ever; an episode closed at its credits made Play offer the credits again.
+
+`library/watched.ts`: watched from the FIRST end-credits chapter in the final fifth
+("End Credits", "28. Credits", "Roads? (Credits)"), never an opening-credits chapter or a
+mid/post-credits scene, and never later than the final 5%. No such chapter: the final 5%.
+A flat earlier cut-off would not do — Curse of the Black Pearl's credits start at 93.0% —
+and going lower marks films finished before their endings. The play handler passes the
+position; the store stays the only judge of "finished". Tests use the measured layouts.
 
 ## state/ is guarded at four layers
 

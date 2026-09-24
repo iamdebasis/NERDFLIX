@@ -2,7 +2,7 @@
 
 **Status:** Locked
 **Target:** macOS 14+, Apple Silicon (any generation), single user, offline-capable
-**Last updated:** 2026-09-23 (TV shows, §5, §7.2–7.4)
+**Last updated:** 2026-09-24 (year-numbered series, series described from films, watched rule — §5.1, §5.4, §7.3, §7.4)
 
 This document is the source of truth for architectural decisions. It is written to be read
 by both humans and coding agents. If an implementation disagrees with this document, the
@@ -230,7 +230,9 @@ records live in their own directory. Show-only fields:
   originCountry: z.string().optional(),    // TMDB code; "GB" for a `.UK` release
   endYear: z.number().optional(),          // set only once TMDB says the show has ended
   seasonInfo: z.array(SeasonInfo),         // OWNED seasons only: name, airYear, episodeCount
-  episodeInfo: z.array(EpisodeInfo),       // OWNED episodes only: name, overview, runtime, still
+  episodeInfo: z.array(EpisodeInfo),       // OWNED episodes only: name, overview, runtime, still,
+                                           //   and tmdbId when the episode is a TMDB FILM
+  episodesAsFilms: z.boolean(),            // described from films; see §7.4
 ```
 
 `seasonInfo` and `episodeInfo` are keyed by season and episode number, not by file,
@@ -325,6 +327,13 @@ Episode progress is keyed by `contentId`, for the same reason media is: renaming
 moving an episode must not lose your place in it. A show's own `progress` entry names
 the episode last touched, which is what next-up follows — it resumes that episode if
 unfinished, otherwise offers the one after it, and never advances into Specials.
+Nothing plays on its own: there is no autoplay, by decision (see CLAUDE.md).
+
+**Watched** means reaching the end credits: from the first end-credits chapter in the
+final fifth of the file, never later than the final 5%, and the final 5% when no chapter
+names the credits (`library/watched.ts`). People close the player at the credits; the
+old "last 3%" sat inside them — on the real library every named credits chapter starts
+between 93.0% and 96.4%.
 
 **Nothing may cost the whole file.** mpv reports an unavailable `time-pos` with no
 value as a file unloads; recorded as-is it made the file invalid, and the old loader
@@ -460,6 +469,16 @@ Nothing else is an episode. A film misfiled as TV disappears from the film shelv
 which is worse than an episode left on them. `Star.Wars.Episode.4` and friends are in
 `episode.test.ts` as cases that must stay films.
 
+**A season may be a year** — `Tom and Jerry - S1940E01`, in `Season 1940/`. Years are read
+only in explicit context (the marker, a folder named exactly for the season, a season
+pack), never in the looser "looks like TV" check, where `Open.Season.2006` is a film.
+
+**A known file is re-filed when its reading changes kind.** Identity is content, so a
+file that now reads as an episode is still found in the film record it was first filed
+under. Ingest moves it — the known media entry, with every drive it has been seen on —
+and deletes the old record if emptied. Never for a confirmed title (§7.4), never for a
+reading that cannot be filed.
+
 The series name comes from the file itself first, then from the nearest folder that is
 not a season folder or a generic one (`TV/`, `Shows/`), reading a season-pack folder
 (`Show.S02.2160p.REMUX`) for its series part. A trailing year (`Doctor.Who.2005`) and a
@@ -497,6 +516,22 @@ title.
   year or country is genuinely ambiguous.
 - Popularity is never a tie-breaker. The more popular show is not more likely to be
   the one on your drive.
+
+**A series TMDB lists as films.** TMDB has no series for the classic Tom and Jerry
+shorts; each is a film. Two exclusions keep the wrong series out:
+
+- A series cannot have episodes numbered by a year before it first aired. TMDB's only
+  series named exactly "Tom and Jerry" began in 2023 — without this rule it matches the
+  1940s cartoons automatically: perfect name, no year to object, no rival.
+- A TV match must have the year-numbered seasons on disk, unless confirmed.
+
+Then each episode is matched as a film: near-exact title, released within its season's
+span (a year season may be one year or a decade), runtime agreeing with the file. Two
+films still fitting are settled by the directors most of the series shares; otherwise
+neither is chosen. A matched episode keeps its film's id and is re-derived from cache,
+never searched again; one not found is recorded as looked for. Series-level facts —
+years, genres, creators — are derived from the films. No series synopsis exists, and
+none is written.
 
 TV and film ids are separate number spaces at TMDB, so the raw-response cache is
 namespaced (`cache/tmdb/tv/`). A show is re-enriched when new episodes arrive that it has

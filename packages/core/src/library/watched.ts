@@ -3,7 +3,7 @@
  *
  * People close the player when the credits start. The old rule — the last 3% — sat
  * inside the credits of nearly everything: on the library this was measured against,
- * 11 of 15 films carry a chapter named for the end credits, and every one of those
+ * 11 of the 15 films with chapters name one for the end credits, and every one of those
  * starts between 93.0% and 96.4%. So a film closed at its credits stayed "in progress"
  * forever, and with no autoplay an episode closed at its credits made Play offer the
  * credits again instead of the next episode.

@@ -6,7 +6,7 @@
 
 Browse your library like a streaming service. Play it like an audiophile.
 
-`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `414 tests`
+`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `461 tests`
 
 </div>
 
@@ -29,8 +29,12 @@ re-encoded, and nothing is ever written to your drives.**
   codecs, HDR format and audio layout from the stream with ffprobe — never from the
   filename.
 - **Understands TV shows** — episodes grouped into series, seasons and episode lists
-  with TMDB names, stills and synopses, per-episode resume, and a Play button that knows
-  which episode comes next.
+  with TMDB names, stills and synopses, and per-episode resume. Click an episode and
+  exactly that one plays; the show's Play button picks up where you left off. Even a
+  series TMDB only lists as individual films — the classic Tom and Jerry cartoons — gets
+  a proper episode list.
+- **Knows when you have finished** — a film or episode closed at its end credits counts
+  as watched, because the file's own chapters say where the credits begin.
 - **Fetches artwork, cast, synopses and trailers** from TMDB with your own free token,
   entered in the app.
 - **Browses like a streaming service** — a hero billboard that plays trailers, rows,
@@ -151,6 +155,7 @@ TV shows live in the same library as films. Any of the usual layouts is recognis
 Breaking Bad/Season 1/Breaking.Bad.S01E01.Pilot.2160p.mkv   SxxEyy in the name
 The.Office.US.S02.2160p.BluRay.REMUX/S02E01.mkv              series from the pack folder
 Chernobyl/Season 1/01 - 1.23.45.mkv                          numbered, inside "Season N"
+Tom and Jerry/Season 1940/S1940E01 - Puss Gets The Boot.mkv  a year as the season
 ```
 
 A year or country suffix (`Doctor.Who.2005`, `The.Office.UK`) keeps a remake apart from
@@ -329,6 +334,22 @@ Grouping is conservative for the same reason. Episodes join a show by name; a ye
 country can only keep two apart, never pull them together. A show split in two is
 visible and fixable. *The Office* (UK) merged into *The Office* (US) is not.
 
+### A cartoon from 1940 is not a show from 2023
+
+The classic Tom and Jerry shorts ship as a series — `Tom and Jerry - S1940E01 - Puss Gets
+The Boot` — and TMDB has no series for them. Every "Tom and Jerry" TV entry there is a
+later show, and the only one named exactly that began in 2023. To the matcher that looked
+perfect: an exact name, no year to object, no rival. All 46 cartoons would have been
+matched, automatically, to the wrong show.
+
+The fix is one rule of the kind this project prefers — a year can only exclude: a series
+cannot have episodes numbered by a year before it first aired. With the 2023 show ruled
+out, each cartoon is matched as what TMDB says it is, a film: the title near-exact, the
+release inside the season's decade, the runtime right. Two shorts called *The Night
+Before Christmas* in the 1940s are told apart by who made them — the one by the same
+directors as the rest of the series. Against the real pack, all 46 matched, and their
+release dates came back in episode order without being asked to.
+
 ### A player saying nothing must not erase your history
 
 Testing TV playback turned up the worst bug the project has had. mpv reports its
@@ -415,7 +436,7 @@ pnpm scan <path>          # scan a library root and print a report
 pnpm enrich               # TMDB metadata and artwork
 pnpm library [--review]   # list titles, availability, match warnings
 pnpm play <file>          # play with a terminal scrubber and live diagnostics
-pnpm test                 # 414 tests
+pnpm test                 # 461 tests
 pnpm typecheck
 ```
 
@@ -429,7 +450,7 @@ pnpm screenshots          # terminal 2 — writes docs/screenshots/
 
 ## Testing
 
-**414 tests**, run against real files and real behaviour rather than mocks — several
+**461 tests**, run against real files and real behaviour rather than mocks — several
 bugs here were only reproducible with genuine 4K HEVC and actual drive behaviour.
 
 The discovery tests build real directory trees in a temp dir and scan them, including
@@ -446,8 +467,6 @@ real run to prove nothing valid in it is lost.
 
 Deliberately deferred, in rough priority order:
 
-- **Next-episode autoplay.** Play knows which episode is next; nothing yet starts it
-  when the current one ends.
 - **Scrub-preview thumbnails** — needs the `thumbfast` pattern (a second hidden mpv
   instance). A pre-generated sprite sheet is impossible on an 80 GB file.
 - **Skip Intro** from MKV chapter markers.
