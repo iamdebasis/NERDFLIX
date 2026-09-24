@@ -64,7 +64,10 @@ export type NextUpCard = {
 /** Show-only facts for tiles, the hover card and the billboard. */
 export type ShowSummary = {
   seasonCount: number;
-  /** "2 Seasons", "1 Season", "Limited Series", "Specials" — what Netflix prints there. */
+  /**
+   * "2 Seasons", "Season 2", "Limited Series", "Specials", or "46 Episodes" for one
+   * season numbered by a year — what Netflix prints there.
+   */
   seasonsLabel: string;
   episodeCount: number;
   creators: string[];

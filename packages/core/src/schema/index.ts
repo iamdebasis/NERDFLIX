@@ -148,6 +148,14 @@ export const EpisodeInfoSchema = z.object({
   runtimeMinutes: z.number().optional(),
   /** Local path to the downloaded still, like `artwork.poster`. */
   still: z.string().optional(),
+  /**
+   * Only for a show whose episodes TMDB lists as FILMS (`Title.episodesAsFilms`): the
+   * film this episode matched. Re-deriving reads that film's cached details, so the
+   * match is never searched for again (§7.4). An entry WITHOUT it and with an empty
+   * `name` records that the episode was looked for and not found — so a pass does not
+   * search for it every time — while the display falls back to the filename's title.
+   */
+  tmdbId: z.number().int().positive().optional(),
 });
 
 export const TitleSchema = z.object({
@@ -177,11 +185,20 @@ export const TitleSchema = z.object({
    * `S01E01.mkv` next time, and it is the one way to tell a remake from its original.
    */
   originCountry: z.string().optional(),
-  /** Shows only: the last year it aired, for "2008–2013". Absent while still running. */
+  /**
+   * Shows only: the last year it aired, for "2008–2013". Absent while still running.
+   * For a show described from films (`episodesAsFilms`), the latest film you own.
+   */
   endYear: z.number().int().optional(),
   /** Shows only. Named `…Info` so they are never confused with the files in `media`. */
   seasonInfo: z.array(SeasonInfoSchema).default([]),
   episodeInfo: z.array(EpisodeInfoSchema).default([]),
+  /**
+   * Shows only: described episode by episode from TMDB FILMS, because TMDB has no
+   * series for it — the classic Tom and Jerry shorts, each one a film there. Such a show
+   * has no series id, overview or season list of its own; see enrich.ts `enrichShorts`.
+   */
+  episodesAsFilms: z.boolean().default(false),
   studio: z.string().optional(),
 
   /** TMDB's franchise grouping. Two or more owned members become a row. */

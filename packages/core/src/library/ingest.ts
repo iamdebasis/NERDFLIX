@@ -389,6 +389,7 @@ export async function ingest(
         creators: [],
         seasonInfo: [],
         episodeInfo: [],
+        episodesAsFilms: false,
         // Deliberately empty. An episode's .nfo carries the EPISODE's IMDb id, and
         // matching the whole series on it would attach someone else's show.
         externalIds: {},
@@ -451,6 +452,7 @@ export async function ingest(
       creators: [],
       seasonInfo: [],
       episodeInfo: [],
+      episodesAsFilms: false,
       externalIds: { imdbId: externalIds.imdbId, tmdbId: externalIds.tmdbId },
       artwork: {},
       media: [media],

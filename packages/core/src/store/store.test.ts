@@ -43,6 +43,7 @@ function title(over: Partial<Title> = {}): Title {
     contentTags: [],
     cast: [],
     directors: [],
+    episodesAsFilms: false,
     externalIds: {},
     artwork: {},
     media: [media()],

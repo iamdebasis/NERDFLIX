@@ -11,6 +11,7 @@ import { basename } from 'node:path';
 import {
   episodeLabel,
   episodeSlots,
+  isYearSeason,
   nextUp,
   seasonsOf,
   slotProgress,
@@ -81,11 +82,22 @@ function resumePctOf(p: EpisodeProgress | undefined): number | null {
  * because "1 Season" reads as a claim about the SHOW: owning season 2 of The Office's
  * nine printed "1 Season" beside a nine-season series. A one-season show TMDB calls a
  * miniseries is "Limited Series", which is what Netflix prints for Chernobyl.
+ *
+ * One season numbered by a YEAR says nothing as a name — Tom and Jerry's "Season 1940"
+ * beside "1940–1949" — so it is counted instead: "46 Episodes", as Netflix prints for
+ * a collection.
  */
-export function seasonsLabel(title: Pick<Title, 'seasonInfo'>, regularSeasons: readonly number[]): string {
+export function seasonsLabel(
+  title: Pick<Title, 'seasonInfo'>,
+  regularSeasons: readonly number[],
+  episodeCount = 0,
+): string {
   if (regularSeasons.length === 0) return 'Specials';
   if (regularSeasons.length === 1) {
     const season = regularSeasons[0];
+    if (isYearSeason(season) && episodeCount > 0) {
+      return `${episodeCount} ${episodeCount === 1 ? 'Episode' : 'Episodes'}`;
+    }
     const name = title.seasonInfo.find((s) => s.season === season)?.name ?? '';
     if (/mini-?series|limited/i.test(name)) return 'Limited Series';
     return /^season \d+$/i.test(name) ? name : `Season ${season}`;
@@ -139,7 +151,7 @@ export function showSummary(
   return {
     summary: {
       seasonCount: regularSeasons.length,
-      seasonsLabel: seasonsLabel(title, regularSeasons),
+      seasonsLabel: seasonsLabel(title, regularSeasons, slots.length),
       episodeCount: slots.length,
       creators: title.creators,
       yearLabel,

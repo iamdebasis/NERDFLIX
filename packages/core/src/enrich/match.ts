@@ -204,6 +204,21 @@ function firstAirYear(c: TmdbShowCandidate): number | undefined {
   return Number.isFinite(y) && y > 1880 ? y : undefined;
 }
 
+/**
+ * Could this series have the seasons on disk? One whose seasons are numbered by year
+ * cannot have first aired after its earliest season.
+ *
+ * Not a score — an exclusion, like every year rule here. Without it `Tom and Jerry -
+ * S1940E01` meets TMDB's only series named exactly "Tom and Jerry", which began in
+ * 2023, with a perfect name, no year to object and no rival: an automatic match of 46
+ * 1940s cartoons to the wrong show. A year off either way is allowed for data slop.
+ */
+export function couldHaveSeasons(c: TmdbShowCandidate, earliestYearSeason?: number): boolean {
+  if (earliestYearSeason === undefined) return true;
+  const y = firstAirYear(c);
+  return y === undefined || y <= earliestYearSeason + 1;
+}
+
 export function scoreShowCandidate(q: ShowQuery, candidate: TmdbShowCandidate): ShowScore {
   const reasons: string[] = [];
   const names = [candidate.name, candidate.original_name].filter(Boolean) as string[];

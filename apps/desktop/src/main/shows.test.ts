@@ -123,6 +123,14 @@ describe('seasons label', () => {
     assert.equal(showSummary(mini, ctx()).summary.seasonsLabel, 'Limited Series');
     assert.equal(showSummary(show([ep(0, 1)]), ctx()).summary.seasonsLabel, 'Specials');
   });
+
+  test('one season numbered by a year is counted, not named — "Season 1940" says nothing', () => {
+    const shorts = show([ep(1940, 1), ep(1940, 2), ep(1940, 3)], { seasonInfo: [{ season: 1940, name: 'Season 1940' }] });
+    assert.equal(showSummary(shorts, ctx()).summary.seasonsLabel, '3 Episodes');
+    assert.equal(showSummary(show([ep(1940, 1)], { seasonInfo: [] }), ctx()).summary.seasonsLabel, '1 Episode');
+    // Several year-numbered seasons are still counted as seasons.
+    assert.equal(showSummary(show([ep(1940, 1), ep(1950, 1)]), ctx()).summary.seasonsLabel, '2 Seasons');
+  });
 });
 
 describe('episode list', () => {
