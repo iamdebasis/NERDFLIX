@@ -44,13 +44,13 @@ re-encoded, and nothing is ever written to your drives.**
   season's poster, episode count and how far through it you are. Click a season and
   the detail view opens on it.
 - **Keeps films and shows apart** where it matters: Recently Added Movies and Recently
-  Added TV Shows are separate rows, with TV Shows and Films tabs besides.
+  Added TV Shows are separate rows, with TV Shows and Films tabs alongside Browse.
 - **Sorts and filters** by title, year, runtime, file size, genre, resolution, HDR,
   unwatched and availability.
 - **Searches** across title, year, genre, director, creator and cast.
 - **Picks the audio and subtitle track before the film starts**, with commentaries
   labelled, so a disc with four audio mixes and forty-seven subtitle tracks opens on the
-  one you wanted. The choice is remembered per film.
+  one you wanted. The choice is remembered per film or show.
 - **Plays through mpv or IINA** with HDR passthrough, hardware decode and quality that
   adapts to your machine in both directions — then reports what actually happened rather
   than what was requested.
@@ -59,17 +59,46 @@ re-encoded, and nothing is ever written to your drives.**
 
 ## What it looks like
 
+Every screenshot is captured by driving the real app over a real library — `pnpm
+screenshots` regenerates them, and refuses to write one unless the page is in the state
+it claims to show.
+
+### Browse
+
 |  |  |
 |---|---|
-| **The billboard plays.** Five seconds after the page settles, the hero's artwork gives way to the film's trailer — then hands over to the next film in *Recently Added* when it finishes, still → trailer → still → dissolve, rather than a cut. | ![Hero trailer](docs/screenshots/03-hero-trailer.jpg) |
-| **Franchises group themselves.** TMDB knows which films belong to a collection, so owning two or more of them makes a row — in release order, above the genre rows. No tagging, no folders, no network calls. | ![Collections](docs/screenshots/04-collections.jpg) |
-| **Hover to preview.** The trailer plays where the poster was, and *keeps playing* when the card expands — one player that moves, never reloads. | ![Hover preview](docs/screenshots/05-hover-preview.jpg) |
-| **Detail view.** Logo, resume progress, technical truth about the file: real resolution, real HDR format, real audio layout and bitrate — all read from the stream. | ![Detail](docs/screenshots/06-detail.jpg) |
-| **Sort and filter.** Facets come from your library, not a fixed list — a filter that cannot change the result is never offered, so nothing you press does nothing. | ![Filters](docs/screenshots/07-filters.jpg) |
-| **Results are a grid.** Searching, filtering or sorting collapses the shelves into one ordered set, because the size of the answer is the point. | ![Results grid](docs/screenshots/08-results-grid.jpg) |
-| **Choose the track before you start.** A remux carries the feature mix, commentaries and dozens of subtitle tracks. Pick them here rather than hunting through a player menu while the opening plays. | ![Track picker](docs/screenshots/09-track-picker.jpg) |
-| **TV, episode by episode.** Seasons, TMDB's episode names, stills and synopses, and a Play button that means *the next one* — resume where you stopped, or the episode after the one you finished. Each episode has its own resume point. | ![TV episodes](docs/screenshots/10-tv-episodes.jpg) |
-| **Your drives, as they are.** Per-drive cards plus a combined view whose counts are deduplicated — the same film on two drives is one film, not two. | ![Library picker](docs/screenshots/01-library-picker.jpg) |
+| **The billboard plays.** Five seconds after the page settles, the artwork gives way to the trailer — then hands over to the next thing you added: still → trailer → still → dissolve, never a cut. | ![The billboard playing a trailer](docs/screenshots/03-hero-trailer.jpg) |
+| ![A hover card playing the trailer](docs/screenshots/05-hover-preview.jpg) | **Hover to preview.** The trailer plays where the poster was, and *keeps playing* when the card expands into the detail view — one player that moves, never reloads. |
+| **Films and shows, kept apart.** *Recently Added Movies* and *Recently Added TV Shows* are separate rows — "what shall I watch tonight" and "which series did I add" are different questions. TV Shows and Films tabs sit beside Browse. | ![Recently Added Movies and Recently Added TV Shows](docs/screenshots/13-films-and-shows.jpg) |
+| ![A franchise row in release order](docs/screenshots/04-collections.jpg) | **Franchises group themselves.** Own two or more films of a collection and they get a row of their own, in release order, above the genres. No tagging, no folders, no network calls. |
+
+### TV — new in 1.0.1
+
+|  |  |
+|---|---|
+| **Every series gets a shelf.** A show with several seasons gets a row of its own: one card per season, wearing that season's poster, with its episodes, its years and how far through it you are. Click a season and the detail view opens on it. | ![Tom and Jerry, one card per season](docs/screenshots/11-season-shelf.jpg) |
+| ![A show's detail view](docs/screenshots/12-show-detail.jpg) | **Pick up where you left off.** A show's Play knows which episode is next — the one you stopped partway through, or the one after the last you finished. Who made it, what it holds, and the audio and subtitles it should start on. |
+| **Episode by episode.** TMDB's names, stills and synopses, with a resume point for every episode — click one and exactly that one plays. Even series TMDB only lists as individual films, like these 1940s Tom and Jerry shorts, are described one by one. | ![The episode list](docs/screenshots/10-tv-episodes.jpg) |
+
+### The detail view
+
+|  |  |
+|---|---|
+| ![A film's detail view](docs/screenshots/06-detail.jpg) | **The truth about the file.** The logo over the trailer, and what the file really is — resolution, HDR format, audio layout and the real bitrate, all read from the stream, never from the filename. |
+| **Choose the track before you start.** A remux carries the feature mix, commentaries and dozens of subtitle tracks. Pick them here — commentaries labelled as such — rather than hunting through a player menu while the opening plays. | ![The track picker with a commentary chosen](docs/screenshots/09-track-picker.jpg) |
+
+### Finding things
+
+|  |  |
+|---|---|
+| ![The sort and filter panel](docs/screenshots/07-filters.jpg) | **Sort and filter.** Facets come from your own library, not a fixed list — a filter that could not change the result is never offered, so nothing you press does nothing. |
+| **Results are a grid.** Searching, filtering or sorting collapses the shelves into one ordered set, because the size of the answer is the point. | ![A filtered result grid](docs/screenshots/08-results-grid.jpg) |
+
+### Your drives
+
+|  |  |
+|---|---|
+| ![The library picker](docs/screenshots/01-library-picker.jpg) | **Your drives, as they are.** A card per drive that says what it holds — films and shows counted separately — with Rescan beside it. Pair several and a combined card appears, counting a film held on two drives once. |
 
 ---
 
