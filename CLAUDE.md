@@ -95,7 +95,7 @@ guess.
   Jerry shorts) are described episode by episode. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 461 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 473 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -221,6 +221,47 @@ substance and none of it is visible in a screenshot. Equal-sized rows break ties
 NAME rather than relying on sort stability: the old inline version ordered genres by
 count alone, so two equally common genres came out in whatever order the library
 happened to load in.
+
+**Rows carry a KIND** (`continue`, `my-list`, `recent`, `seasons`, `collection`,
+`genre`), and the renderer keys every behaviour on it — which rows survive a TV/Films
+tab with one title, which rows the billboard follows. It used to match TITLE STRINGS
+("Recently Added", "TV Shows"), and splitting Recently Added in two would have silently
+broken both. Never compare a row's title in code again.
+
+**Recently Added is two rows when the library holds both kinds** — "Recently Added
+Movies", then "Recently Added TV Shows" (the user's request: don't combine them). A
+library of one kind keeps the plain "Recently Added": there is nothing to separate. The
+old "TV Shows" row is gone; it was the same list as Recently Added TV Shows. On the TV
+and Films tabs the surviving recent row is retitled "Recently Added" — the tab already
+says which kind, and the user asked for that row to stay as it was. The billboard
+follows both recent rows merged back into arrival order.
+
+**A show with 2+ seasons gets a shelf of season cards** (`kind: 'seasons'`, the user's
+design, 2026-09-24): the show's name with "2 Seasons · 114 Episodes · 1940–1958 · 7
+watched" beside it, then one card per season, Specials last. One season is not a shelf
+(`MIN_ROW`) — its episodes are one click away already. The shelf sits right after
+Recently Added, above franchises.
+
+- A card wears the season's OWN poster (`SeasonInfo.poster`): TMDB's season poster for a
+  series; for a show described from films, the poster of the film that season began
+  with. Without one it wears the show's, and the caption still says which season.
+- Clicking a card opens the detail view ON that season (`initialSeason`). Every way of
+  opening goes through `openDetail`/`closeDetail`, so a season chosen from a card never
+  lingers into the next time the show is opened from its tile.
+- Cards are NOT hover-card tiles. The preview describes a title, and every card on the
+  shelf is the same title.
+- The watched line is rendered on every card and hidden when empty. Its height is what
+  keeps the captions level: without it a started season's "SEASON 1940" sat higher than
+  its neighbour's — found by measuring the rendered frame, not by reading the CSS.
+- Cards are built in the main process (`seasonCards` in shows.ts) from the same slots,
+  resolver and next-up as the episode list, so a card cannot disagree with the list.
+
+**Season posters are a DERIVE_VERSION backfill (now 2), and enrichment runs after EVERY
+scan.** It used to run only when a scan found something new, but a fully scanned
+library only ever reads "Up to date", so a backfill never ran. A pass with nothing to do
+returns before any network call (`needsEnrichment` filters first). Verified by stripping
+the posters from a library and pressing Rescan: "Up to date", posters back, 112 matches
+unchanged.
 
 ## Sort and filter
 

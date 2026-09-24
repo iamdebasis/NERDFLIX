@@ -2,7 +2,7 @@
 
 **Status:** Locked
 **Target:** macOS 14+, Apple Silicon (any generation), single user, offline-capable
-**Last updated:** 2026-09-24 (year-numbered series, series described from films, watched rule — §5.1, §5.4, §7.3, §7.4)
+**Last updated:** 2026-09-24 (year-numbered series, series described from films, watched rule, season shelves — §5.1, §5.4, §7.3, §7.4, §8.3)
 
 This document is the source of truth for architectural decisions. It is written to be read
 by both humans and coding agents. If an implementation disagrees with this document, the
@@ -566,6 +566,12 @@ disconnected animations will not feel right no matter how they are tuned.
 - **Controls:** circular play, add-to-list, thumbs, and chevron-down (expand).
 
 ### 8.3 Rows
+
+Every row carries a kind — continue, my list, recent, seasons, collection, genre — and
+behaviour keys on it, never on a title. Order: Continue Watching, My List, Recently Added
+(split into Movies and TV Shows when the library holds both), a shelf of season cards
+for each show with two or more seasons, franchises, then genres. A season card opens
+the detail view on its season.
 
 Paginated carousels, not free scroll. Compute items-per-page from container width,
 translate by whole pages, render a peek of the next item. Virtualize: mount visible rows

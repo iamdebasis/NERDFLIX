@@ -6,7 +6,7 @@
 
 Browse your library like a streaming service. Play it like an audiophile.
 
-`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `461 tests`
+`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `473 tests`
 
 </div>
 
@@ -39,7 +39,12 @@ re-encoded, and nothing is ever written to your drives.**
   entered in the app.
 - **Browses like a streaming service** — a hero billboard that plays trailers, rows,
   hover previews, a detail view, My List and Continue Watching with resume points.
-- **Groups franchises automatically** into collection rows, in release order.
+- **Groups franchises automatically** into collection rows, in release order — and gives
+  a show with several seasons a shelf of its own, one card per season with that
+  season's poster, episode count and how far through it you are. Click a season and
+  the detail view opens on it.
+- **Keeps films and shows apart** where it matters: Recently Added Movies and Recently
+  Added TV Shows are separate rows, with TV Shows and Films tabs besides.
 - **Sorts and filters** by title, year, runtime, file size, genre, resolution, HDR,
   unwatched and availability.
 - **Searches** across title, year, genre, director, creator and cast.
@@ -436,7 +441,7 @@ pnpm scan <path>          # scan a library root and print a report
 pnpm enrich               # TMDB metadata and artwork
 pnpm library [--review]   # list titles, availability, match warnings
 pnpm play <file>          # play with a terminal scrubber and live diagnostics
-pnpm test                 # 461 tests
+pnpm test                 # 473 tests
 pnpm typecheck
 ```
 
@@ -450,7 +455,7 @@ pnpm screenshots          # terminal 2 — writes docs/screenshots/
 
 ## Testing
 
-**461 tests**, run against real files and real behaviour rather than mocks — several
+**473 tests**, run against real files and real behaviour rather than mocks — several
 bugs here were only reproducible with genuine 4K HEVC and actual drive behaviour.
 
 The discovery tests build real directory trees in a temp dir and scan them, including
