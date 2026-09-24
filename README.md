@@ -98,7 +98,7 @@ it claims to show.
 
 |  |  |
 |---|---|
-| ![The library picker](docs/screenshots/01-library-picker.jpg) | **Your drives, as they are.** A card per drive that says what it holds — films and shows counted separately — with Rescan beside it. Pair several and a combined card appears, counting a film held on two drives once. |
+| ![The library picker](docs/screenshots/01-library-picker.jpg) | **Your drives, as they are.** A card per drive that says what it holds — films and shows counted separately — with Rescan beside it. Pair several and an *Everything* card joins them, counting a film held on two drives once — and saying so. |
 
 ---
 

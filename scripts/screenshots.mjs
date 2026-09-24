@@ -147,8 +147,15 @@ await shot('04-collections.jpg', 'a franchise row, in release order');
 // The first row is tall enough that its card is never clamped against the top.
 await cdp.eval(`document.querySelector('.browse').scrollTo({ top: 0 })`);
 await wait(800);
-await reveal(`${RECENT_FILMS}.querySelectorAll('.tile')[2]`);
-await cdp.pointer(`${RECENT_FILMS}.querySelectorAll('.tile')[2]`);
+/*
+ * Which film: one whose trailer YouTube will actually play inline. An embed that will
+ * not autoplay — it happened to Terminator 3's — shows YouTube's red play button where
+ * the preview should be, and the app cannot see inside the frame to tell. Chosen by
+ * eye for the library these shots are taken from, and not the billboard's own film.
+ */
+const PREVIEW_TILE = `${RECENT_FILMS}.querySelectorAll('.tile')[3]`;
+await reveal(PREVIEW_TILE);
+await cdp.pointer(PREVIEW_TILE);
 await until(cdp, `Boolean(document.querySelector('.hover-card'))`, { timeout: 8000 });
 // Wait for the PREVIEW player specifically. `.trailer-video` also exists inside the
 // hero, so a looser selector matches the billboard's frame and resolves instantly —
@@ -162,7 +169,7 @@ await assert(`Boolean(document.querySelector('.hover-card'))`, 'the hover card w
 await shot('05-hover-preview.jpg', 'hover card with the trailer playing in it');
 
 // --- 6. the detail view ------------------------------------------------------
-await cdp.pointer(`${RECENT_FILMS}.querySelectorAll('.tile')[2]`, { click: true });
+await cdp.pointer(PREVIEW_TILE, { click: true });
 await until(cdp, `Boolean(document.querySelector('.modal-panel'))`);
 await wait(3000);
 await assert(`document.querySelector('.modal-panel').innerText.length > 40`, 'the modal is empty');
