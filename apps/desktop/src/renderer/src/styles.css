@@ -965,6 +965,125 @@ body {
   background: var(--red);
 }
 
+/* --- a show's own shelf: one card per season ---------------------------------- */
+
+/* Beside the show's name, quieter: what it holds and how far through you are. */
+.row-subtitle {
+  margin-left: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: #8c8c8c;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Same size and shape as a poster tile, so a season shelf sits beside a franchise row
+ * as one family. The caption carries the season because the art often cannot: a
+ * season with no poster of its own wears the show's.
+ */
+.season-tile {
+  text-align: left;
+  color: #fff;
+}
+
+.season-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.92) 0%,
+    rgba(0, 0, 0, 0.7) 30%,
+    rgba(0, 0, 0, 0) 58%
+  );
+  pointer-events: none;
+}
+
+.season-caption {
+  position: absolute;
+  left: 0.8rem;
+  right: 0.8rem;
+  bottom: 0.8rem;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.season-kicker {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #d6d6d6;
+}
+
+.season-big {
+  font-size: 2.2rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+}
+
+/* "Miniseries", "Specials": a word, not a number, so it cannot be set as large. */
+.season-big.is-word {
+  font-size: 1.3rem;
+  line-height: 1.15;
+}
+
+.season-meta {
+  font-size: 0.72rem;
+  color: #cfcfcf;
+  font-variant-numeric: tabular-nums;
+}
+
+.season-watched {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.3rem;
+  font-size: 0.66rem;
+  color: #bdbdbd;
+  font-variant-numeric: tabular-nums;
+}
+
+.season-watched.is-empty {
+  visibility: hidden;
+}
+
+.season-watched-bar {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.season-watched-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--red);
+}
+
+.season-badge {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 1;
+  padding: 0.2rem 0.45rem;
+  border-radius: 2px;
+  background: var(--red);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.season-tile:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
 .pager {
   position: absolute;
   top: 0;

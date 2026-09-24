@@ -138,6 +138,60 @@ describe('seasons label', () => {
   });
 });
 
+describe('season cards for the show shelf', () => {
+  const t = show([ep(1, 1), ep(1, 2), ep(2, 1), ep(0, 1)], {
+    seasonInfo: [
+      { season: 1, name: 'Season 1', episodeCount: 7, poster: '/cache/show-x/season-s01.jpg' },
+      { season: 2, name: 'Season 2', airYear: 2009 },
+    ],
+    episodeInfo: [
+      { season: 1, episode: 1, name: 'Pilot', airDate: '2008-01-20' },
+      { season: 1, episode: 2, name: 'Cat', airDate: '2008-03-09' },
+    ],
+  });
+
+  test('every season, in order, Specials last', () => {
+    const cards = showSummary(t, ctx()).summary.seasons;
+    assert.deepEqual(cards.map((c) => [c.season, c.name, c.episodeCount]), [
+      [1, 'Season 1', 2],
+      [2, 'Season 2', 1],
+      [0, 'Specials', 1],
+    ]);
+  });
+
+  test("years come from the episodes' air dates, else TMDB's season year", () => {
+    const [s1, s2] = showSummary(t, ctx()).summary.seasons;
+    assert.equal(s1.yearLabel, '2008');
+    assert.equal(s2.yearLabel, '2009');
+  });
+
+  test("the season's own poster is served under the title; none means the card wears the show's", () => {
+    const [s1, s2] = showSummary(t, ctx()).summary.seasons;
+    assert.equal(s1.poster, 'media://art/show-x/season-s01.jpg');
+    assert.equal(s2.poster, null);
+  });
+
+  test('watched counts, and "Up next" only once you have started', () => {
+    assert.equal(showSummary(t, ctx()).summary.seasons.some((c) => c.upNext), false, 'nothing started yet');
+    const partway = ctx({ 'c-1-1': { positionSec: 0, durationSec: 3000, watched: true, lastPlayedAt: 'a' } }, 'c-1-1');
+    const cards = showSummary(t, partway).summary.seasons;
+    assert.deepEqual(cards.map((c) => [c.season, c.watchedCount, c.upNext]), [
+      [1, 1, true],
+      [2, 0, false],
+      [0, 0, false],
+    ]);
+  });
+
+  test('a season whose every episode is on an unplugged drive says which drive', () => {
+    const elsewhere = (n: number) => ep(3, n, { sightings: [{ volumeId: 'vol-b', relPath: 'x', fingerprint: '', lastSeen: '' }] });
+    const cards = showSummary(show([ep(1, 1), elsewhere(1), elsewhere(2)]), ctx({}, undefined, ['vol-a'])).summary.seasons;
+    assert.deepEqual(cards.map((c) => [c.season, c.available, c.offlineOn]), [
+      [1, true, null],
+      [3, false, 'VOL-B'],
+    ]);
+  });
+});
+
 describe('episode list', () => {
   const list = showEpisodes(show([ep(1, 1), ep(1, 2, { episodeTitle: 'Cats in the Bag' })]), ctx());
 

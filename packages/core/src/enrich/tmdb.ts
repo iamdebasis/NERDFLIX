@@ -89,6 +89,7 @@ export type TmdbShow = {
     overview?: string;
     air_date?: string | null;
     episode_count?: number;
+    poster_path?: string | null;
   }>;
   /** Series-wide cast. `credits` alone is only the latest season's. */
   aggregate_credits?: {

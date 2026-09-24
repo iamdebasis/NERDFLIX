@@ -136,6 +136,12 @@ export const SeasonInfoSchema = z.object({
   airYear: z.number().int().optional(),
   /** How many episodes TMDB lists — lets the UI say "8 of 10 episodes" honestly. */
   episodeCount: z.number().int().nonnegative().optional(),
+  /**
+   * Local path to the season's own poster, for its card on the show's shelf. TMDB's
+   * season poster for a series; for a show described from films, the season's earliest
+   * film's poster — which is what that season began with.
+   */
+  poster: z.string().optional(),
 });
 
 /** TMDB's description of one owned episode. Keyed by season and number, not by file. */

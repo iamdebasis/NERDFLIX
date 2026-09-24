@@ -34,7 +34,7 @@ import type { EpisodeInfo, SeasonInfo } from '../schema/index.js';
  * pass — free, because the response is on disk, and safe, because re-deriving is not
  * re-matching (§7.4).
  */
-export const DERIVE_VERSION = 1;
+export const DERIVE_VERSION = 2; // 2: a poster per season, for the show's shelf of season cards
 
 export type EnrichOutcome = {
   titleId: string;
@@ -252,6 +252,7 @@ export function applyShowDetails(
     title.episodeInfo.filter((i) => i.still).map((i) => [slotKey(i.season, i.episode), i.still!]),
   );
 
+  const priorPosters = new Map(title.seasonInfo.filter((s) => s.poster).map((s) => [s.season, s.poster!]));
   const seasonInfo: SeasonInfo[] = (show.seasons ?? [])
     .filter((s) => owned.has(s.season_number))
     .map((s) => ({
@@ -260,6 +261,8 @@ export function applyShowDetails(
       overview: s.overview || undefined,
       airYear: yearOf(s.air_date),
       episodeCount: s.episode_count,
+      // Downloaded once; a re-derive keeps it. A re-match starts from an empty list.
+      poster: priorPosters.get(s.season_number),
     }));
 
   const ownedKeys = new Set(slots.map((s) => s.key));
@@ -383,6 +386,7 @@ export function applyShortsDetails(
         season,
         name: `Season ${season}`,
         airYear: inSeason.length ? Math.min(...inSeason) : undefined,
+        poster: title.seasonInfo.find((s) => s.season === season)?.poster,
       };
     });
 
@@ -518,6 +522,21 @@ async function enrichShorts(
           if (await download(imageUrl(backdrop, 'w300'), join(dir, file))) info.still = join(dir, file);
         });
       await downloadAll(jobs);
+
+      // Each season's card wears the poster of the film that season began with.
+      const opener = new Map<number, string>();
+      for (const e of [...entries].sort((a, b) => (a.film?.release_date ?? '').localeCompare(b.film?.release_date ?? ''))) {
+        const poster = e.film ? pickImage(e.film.images?.posters, 'poster') : null;
+        if (poster && !opener.has(e.season)) opener.set(e.season, poster);
+      }
+      await downloadAll(
+        updated.seasonInfo
+          .filter((s) => !s.poster && opener.has(s.season))
+          .map((info) => async () => {
+            const file = `season-s${String(info.season).padStart(2, '0')}.jpg`;
+            if (await download(imageUrl(opener.get(info.season)!, 'w342'), join(dir, file))) info.poster = join(dir, file);
+          }),
+      );
 
       updated = { ...updated, artwork };
     }
@@ -678,6 +697,19 @@ async function enrichShow(
           }
         });
       await downloadAll(jobs);
+
+      // A poster per owned season, for the season cards on the show's own shelf.
+      const seasonPosters = new Map(
+        (show.seasons ?? []).filter((s) => s.poster_path).map((s) => [s.season_number, s.poster_path!]),
+      );
+      await downloadAll(
+        updated.seasonInfo
+          .filter((s) => !s.poster && seasonPosters.has(s.season))
+          .map((info) => async () => {
+            const file = `season-s${String(info.season).padStart(2, '0')}.jpg`;
+            if (await download(imageUrl(seasonPosters.get(info.season)!, 'w342'), join(dir, file))) info.poster = join(dir, file);
+          }),
+      );
 
       updated = { ...updated, artwork };
     }

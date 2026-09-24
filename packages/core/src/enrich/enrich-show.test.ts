@@ -133,6 +133,12 @@ describe('applying a TMDB series', () => {
     assert.equal(running.endYear, undefined);
   });
 
+  test("a season poster already downloaded survives a re-derive — it is not fetched every pass", () => {
+    const before = show({ seasonInfo: [{ season: 1, name: 'Miniseries', poster: '/cache/season-s01.jpg' }] });
+    const after = applyShowDetails(before, CHERNOBYL, [SEASON_1], 'US');
+    assert.equal(after.seasonInfo[0].poster, '/cache/season-s01.jpg');
+  });
+
   test('stills already downloaded survive a refresh', () => {
     const before = show({ episodeInfo: [{ season: 1, episode: 1, name: 'x', still: '/cache/still.jpg' }] });
     const after = applyShowDetails(before, CHERNOBYL, [SEASON_1], 'US');

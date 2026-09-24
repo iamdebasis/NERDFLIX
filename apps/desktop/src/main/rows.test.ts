@@ -2,6 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildRows, type Row, type RowCard } from './rows.js';
+import type { SeasonCard } from '../shared/types.js';
 
 /**
  * What ends up on each shelf, and in what order.
@@ -141,20 +142,33 @@ describe('row assembly', () => {
     assert.deepEqual(first, second);
   });
 
-  test('shows get their own shelf, newest first, right after Recently Added', () => {
+  test('films and shows arrive in separate rows, each newest first', () => {
     const cards = [
-      card('film', { addedAt: '2026-03-01' }),
-      card('wire', { type: 'show', addedAt: '2026-01-01' }),
+      card('film-old', { addedAt: '2026-01-01' }),
+      card('wire', { type: 'show', addedAt: '2026-01-15' }),
+      card('film-new', { addedAt: '2026-03-01' }),
       card('chernobyl', { type: 'show', addedAt: '2026-02-01' }),
     ];
     const rows = buildRows(cards, EMPTY);
-    assert.deepEqual(rows.map((r) => r.title).slice(0, 2), ['Recently Added', 'TV Shows']);
-    assert.deepEqual(row(rows, 'TV Shows')?.titleIds, ['chernobyl', 'wire']);
+    assert.deepEqual(rows.map((r) => r.title).slice(0, 2), ['Recently Added Movies', 'Recently Added TV Shows']);
+    assert.deepEqual(row(rows, 'Recently Added Movies')?.titleIds, ['film-new', 'film-old']);
+    assert.deepEqual(row(rows, 'Recently Added TV Shows')?.titleIds, ['chernobyl', 'wire']);
+    assert.equal(row(rows, 'Recently Added'), undefined, 'the two kinds were combined again');
+    assert.equal(row(rows, 'TV Shows'), undefined, 'the old TV Shows row duplicates Recently Added TV Shows');
   });
 
-  test('one show is not a shelf', () => {
-    const rows = buildRows([card('film'), card('wire', { type: 'show' })], EMPTY);
-    assert.equal(row(rows, 'TV Shows'), undefined);
+  test('a library of one kind keeps the plain name — there is nothing to separate', () => {
+    assert.deepEqual(buildRows([card('a'), card('b')], EMPTY).map((r) => r.title), ['Recently Added']);
+    const shows = [card('x', { type: 'show' }), card('y', { type: 'show' })];
+    assert.deepEqual(buildRows(shows, EMPTY).map((r) => r.title), ['Recently Added']);
+  });
+
+  test('every row says what kind it is, so the renderer never keys on a title', () => {
+    const rows = buildRows(
+      [card('a', { genres: ['Action'], collection: SW }), card('b', { genres: ['Action'], collection: SW })],
+      { continueIds: ['a'], myListIds: ['b'] },
+    );
+    assert.deepEqual(rows.map((r) => r.kind), ['continue', 'my-list', 'recent', 'collection', 'genre']);
   });
 
   test('genre rows mix films and shows', () => {
@@ -164,5 +178,64 @@ describe('row assembly', () => {
 
   test('an empty library has no rows', () => {
     assert.deepEqual(buildRows([], EMPTY), []);
+  });
+});
+
+describe("a show's own shelf of seasons", () => {
+  const season = (n: number, over: Partial<SeasonCard> = {}): SeasonCard => ({
+    season: n,
+    name: `Season ${n}`,
+    episodeCount: 10,
+    poster: null,
+    watchedCount: 0,
+    upNext: false,
+    available: true,
+    offlineOn: null,
+    ...over,
+  });
+  const tomAndJerry = card('show-tom-and-jerry', {
+    type: 'show',
+    title: 'Tom and Jerry',
+    addedAt: '2026-02-01',
+    show: {
+      seasonCount: 2,
+      seasonsLabel: '2 Seasons',
+      episodeCount: 114,
+      yearLabel: '1940–1958',
+      seasons: [season(1940, { episodeCount: 46 }), season(1950, { episodeCount: 68 })],
+    },
+  });
+
+  test('a show with two seasons gets a shelf named for it, with what it holds beside the name', () => {
+    const rows = buildRows([card('film'), tomAndJerry], EMPTY);
+    const shelf = rows.find((r) => r.kind === 'seasons');
+    assert.deepEqual(
+      [shelf?.title, shelf?.subtitle, shelf?.titleIds],
+      ['Tom and Jerry', '2 Seasons · 114 Episodes · 1940–1958', ['show-tom-and-jerry']],
+    );
+  });
+
+  test('it sits right after Recently Added, above franchises and genres', () => {
+    const rows = buildRows(
+      [card('a', { collection: SW, genres: ['Action'] }), card('b', { collection: SW, genres: ['Action'] }), tomAndJerry],
+      EMPTY,
+    );
+    assert.deepEqual(rows.map((r) => r.kind), ['recent', 'recent', 'seasons', 'collection', 'genre']);
+  });
+
+  test('how far through you are is part of the line, once you have started', () => {
+    const watching = {
+      ...tomAndJerry,
+      show: { ...tomAndJerry.show!, seasons: [season(1940, { watchedCount: 7 }), season(1950, { watchedCount: 5 })] },
+    };
+    assert.equal(buildRows([watching], EMPTY).find((r) => r.kind === 'seasons')?.subtitle, '2 Seasons · 114 Episodes · 1940–1958 · 12 watched');
+  });
+
+  test('one season is not a shelf — its episodes are one click away already', () => {
+    const one = card('show-chernobyl', {
+      type: 'show',
+      show: { seasonCount: 1, seasonsLabel: 'Limited Series', episodeCount: 5, seasons: [season(1)] },
+    });
+    assert.equal(buildRows([one], EMPTY).some((r) => r.kind === 'seasons'), false);
   });
 });

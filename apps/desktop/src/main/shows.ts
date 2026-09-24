@@ -14,6 +14,7 @@ import {
   isYearSeason,
   nextUp,
   seasonsOf,
+  slotKey,
   slotProgress,
   type EpisodeProgress,
   type EpisodeSlot,
@@ -21,7 +22,7 @@ import {
   type MediaResolver,
   type Title,
 } from '@nfl/core';
-import type { EpisodeRow, SeasonRow, ShowEpisodes, ShowSummary } from '../shared/types.js';
+import type { EpisodeRow, SeasonCard, SeasonRow, ShowEpisodes, ShowSummary } from '../shared/types.js';
 
 /** `DV P8`, `HDR10`, `SDR` — what the file actually is, for a badge. */
 export function hdrLabel(media: MediaFile | null | undefined): string {
@@ -105,6 +106,50 @@ export function seasonsLabel(
   return `${regularSeasons.length} Seasons`;
 }
 
+/**
+ * A card per owned season, Specials last, for the show's own shelf.
+ *
+ * Built from the same slots, resolver and next-up as the episode list, so a card
+ * cannot say "Up next" about a season the list disagrees with, or offer a season whose
+ * every episode sits on an unplugged drive as though it would play.
+ */
+function seasonCards(
+  title: Title,
+  slots: readonly EpisodeSlot[],
+  ctx: ShowContext,
+  next: ReturnType<typeof nextUp>,
+): SeasonCard[] {
+  const aired = new Map(title.episodeInfo.map((i) => [slotKey(i.season, i.episode), i.airDate]));
+  const all = seasonsOf(slots);
+  // Having started is what makes "Up next" information rather than decoration.
+  const started = next !== null && (next.reason === 'resume' || next.reason === 'next');
+
+  return [...all.filter((n) => n !== 0), ...all.filter((n) => n === 0)].map((season) => {
+    const inSeason = slots.filter((s) => s.season === season);
+    const states = inSeason.map((s) => slotState(s, ctx.resolver));
+    const info = title.seasonInfo.find((s) => s.season === season);
+    const years = inSeason
+      .map((s) => Number((aired.get(s.key) ?? '').slice(0, 4)))
+      .filter((y) => y > 1880);
+    const first = years.length ? Math.min(...years) : info?.airYear;
+    const last = years.length ? Math.max(...years) : undefined;
+    const available = states.some((x) => x.available);
+
+    return {
+      season,
+      name: seasonName(title, season),
+      episodeCount: inSeason.length,
+      yearLabel:
+        first === undefined ? undefined : last !== undefined && last > first ? `${first}–${last}` : String(first),
+      poster: artworkUrl(title.id, info?.poster),
+      watchedCount: inSeason.filter((s) => slotProgress(s, ctx.byContent)?.watched).length,
+      upNext: started && next.slot.season === season,
+      available,
+      offlineOn: available ? null : (states.find((x) => x.offlineOn)?.offlineOn ?? null),
+    };
+  });
+}
+
 export type ShowContext = {
   resolver: MediaResolver;
   /** Every episode resume point, keyed by contentId. */
@@ -157,6 +202,7 @@ export function showSummary(
       yearLabel,
       nextUp: nextUpCard,
       episodesAsFilms: title.episodesAsFilms === true,
+      seasons: seasonCards(title, slots, ctx, next),
     },
     playable,
   };

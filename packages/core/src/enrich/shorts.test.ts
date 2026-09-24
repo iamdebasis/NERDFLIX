@@ -265,6 +265,15 @@ describe('a year-numbered show TMDB lists as films', () => {
     assert.deepEqual(after.episodeInfo.map((i) => i.still), ['/a.jpg', undefined]);
   });
 
+  test("a season poster survives a refresh, like an episode's still", () => {
+    const before = tomAndJerry({
+      episodesAsFilms: true,
+      seasonInfo: [{ season: 1940, name: 'Season 1940', poster: '/season-s1940.jpg' }],
+    });
+    const after = applyShortsDetails(before, [{ season: 1940, episode: 1, film: FILMS[40372] }]);
+    assert.equal(after.seasonInfo[0].poster, '/season-s1940.jpg');
+  });
+
   test('a confirmed show stays confirmed', () => {
     const after = applyShortsDetails(tomAndJerry({ matchState: 'confirmed' }), [
       { season: 1940, episode: 1, film: FILMS[40372] },

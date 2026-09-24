@@ -154,13 +154,15 @@ export function LibraryPicker({
 
       // Straight into artwork. A library of grey rectangles is not worth looking at,
       // and making that a separate step people have to know about is a poor default.
-      // New episodes of a show you already have count: `created` stays 0 for them, and
-      // they sat with no names or stills until something else triggered a pass.
-      if (r.created > 0 || r.alreadyKnown > 0 || r.episodesAdded > 0 || r.reclassified > 0) {
-        const e = await window.libraries.enrich();
-        setNeedsToken(e.skipped === 'no-token');
-        await refresh();
-      }
+      //
+      // After EVERY scan, not only one that found something: enrichment is also where a
+      // library catches up with a newer derivation (DERIVE_VERSION — season posters,
+      // say), and a fully scanned library only ever reads "Up to date", so gating on
+      // new files meant the backfill never ran. A pass with nothing to do is cheap —
+      // `needsEnrichment` filters before anything touches the network.
+      const e = await window.libraries.enrich();
+      setNeedsToken(e.skipped === 'no-token');
+      await refresh();
     } catch (err) {
       setScanError(err instanceof Error ? err.message : String(err));
     } finally {

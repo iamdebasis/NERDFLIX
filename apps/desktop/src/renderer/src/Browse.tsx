@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   BrowseData,
   NextUpCard,
+  RowKind,
+  SeasonCard,
   ShowEpisodes,
   TitleCard,
   TrackChoice,
@@ -421,10 +423,13 @@ function TrackSelect({
  */
 function EpisodeList({
   card,
+  initialSeason,
   starting,
   onPlayEpisode,
 }: {
   card: TitleCard;
+  /** Opened from a season card: that season, not next-up's. */
+  initialSeason?: number;
   starting: boolean;
   onPlayEpisode: (key: string) => void;
 }) {
@@ -440,19 +445,20 @@ function EpisodeList({
       .then((d) => {
         if (!live) return;
         setData(d);
-        // Open on the season Play means, keeping the one being browsed if it still exists.
+        // Keep the season being browsed if it still exists. Otherwise open on the one
+        // a season card asked for — choosing "Season 1950" and landing on 1940 would
+        // make the card a decoration — and failing that, the one Play means.
+        const has = (n: number | null | undefined) => n != null && d.seasons.some((s) => s.season === n);
         const nextSeason = d.episodes.find((e) => e.key === d.nextUpKey)?.season;
         setSeason((cur) =>
-          cur !== null && d.seasons.some((s) => s.season === cur)
-            ? cur
-            : (nextSeason ?? d.seasons[0]?.season ?? null),
+          has(cur) ? cur : has(initialSeason) ? initialSeason! : (nextSeason ?? d.seasons[0]?.season ?? null),
         );
       })
       .catch(() => {});
     return () => {
       live = false;
     };
-  }, [card]);
+  }, [card, initialSeason]);
 
   useEffect(() => {
     if (!starting) setPressed(null);
@@ -558,12 +564,15 @@ function EpisodeList({
 
 function DetailModal({
   card,
+  initialSeason,
   onClose,
   onPlay,
   onToggleList,
   starting,
 }: {
   card: TitleCard;
+  /** Opened from a season card: the episode list starts on that season. */
+  initialSeason?: number;
   onClose: () => void;
   /** `episodeKey` plays that episode; omitted, a show plays next-up. */
   onPlay: (tracks?: TrackChoice, episodeKey?: string) => void;
@@ -838,6 +847,7 @@ function DetailModal({
             {isShow && (
               <EpisodeList
                 card={card}
+                initialSeason={initialSeason}
                 starting={starting}
                 onPlayEpisode={(key) => onPlay({ audio, subtitle }, key)}
               />
@@ -940,6 +950,100 @@ function Row({
   );
 }
 
+type ShelfKind = RowKind | 'results';
+type Shelf = { kind: ShelfKind; title: string; subtitle?: string; cards: TitleCard[] };
+
+/** "Season 1950" → a small "SEASON" over a large "1950". "Miniseries", "Specials" stay words. */
+function seasonCaption(name: string): { kicker: string | null; big: string; isWord: boolean } {
+  const m = name.match(/^season\s+(\d+)$/i);
+  return m ? { kicker: 'Season', big: m[1], isWord: false } : { kicker: null, big: name, isWord: true };
+}
+
+/**
+ * A show's own shelf: one card per season, the way a franchise gets a collection row.
+ *
+ * A card opens the detail view ON its season — choosing "Season 1950" and landing on
+ * 1940's episodes would make the card a decoration. These are not hover-card tiles: the
+ * hover preview describes a TITLE, and every card on this shelf is the same title, so it
+ * would say the same thing six times over.
+ */
+function SeasonShelf({
+  card,
+  title,
+  subtitle,
+  onOpenSeason,
+}: {
+  card: TitleCard;
+  title: string;
+  subtitle?: string;
+  onOpenSeason: (season: number) => void;
+}) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const page = (dir: 1 | -1) => {
+    const el = scroller.current;
+    if (el) el.scrollBy({ left: dir * el.clientWidth * 0.9, behavior: 'smooth' });
+  };
+  const seasons: SeasonCard[] = card.show?.seasons ?? [];
+
+  return (
+    <section className="row season-shelf">
+      <h2 className="row-title">
+        {title}
+        {subtitle && <span className="row-subtitle">{subtitle}</span>}
+      </h2>
+      <div className="row-viewport">
+        <button className="pager left" onClick={() => page(-1)} aria-label="Scroll left">
+          ‹
+        </button>
+        <div className="row-scroller" ref={scroller}>
+          {seasons.map((s) => {
+            const caption = seasonCaption(s.name);
+            // A season without art of its own wears the show's, and says which season it is.
+            const art = s.poster ?? card.poster;
+            const where = s.available ? null : s.offlineOn ? `On ${s.offlineOn}` : 'Not on any paired drive';
+            return (
+              <button
+                key={s.season}
+                className={`tile season-tile${s.available ? '' : ' offline'}`}
+                onClick={() => onOpenSeason(s.season)}
+                aria-label={`${card.title}, ${s.name}: ${s.episodeCount} episodes${where ? `, ${where}` : ''}`}
+              >
+                {art ? <img src={art} alt="" draggable={false} loading="lazy" /> : <div className="art-fallback" />}
+                {s.upNext && <span className="season-badge">Up next</span>}
+                <span className="season-caption">
+                  {caption.kicker && <span className="season-kicker">{caption.kicker}</span>}
+                  <span className={`season-big${caption.isWord ? ' is-word' : ''}`}>{caption.big}</span>
+                  <span className="season-meta">
+                    {where ??
+                      [`${s.episodeCount} ${s.episodeCount === 1 ? 'episode' : 'episodes'}`, s.yearLabel]
+                        .filter(Boolean)
+                        .join(' \u00b7 ')}
+                  </span>
+                  {/* Always present, hidden when unwatched: its height is what keeps every
+                      card's caption on one line across the shelf. Without it, a season
+                      you had started sat its "SEASON 1940" higher than its neighbour's. */}
+                  <span
+                    className={`season-watched${s.watchedCount > 0 ? '' : ' is-empty'}`}
+                    aria-hidden={s.watchedCount === 0}
+                  >
+                    <span className="season-watched-bar">
+                      <span style={{ width: `${(s.watchedCount / Math.max(1, s.episodeCount)) * 100}%` }} />
+                    </span>
+                    {s.watchedCount === s.episodeCount ? 'Watched' : `${s.watchedCount} of ${s.episodeCount}`}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <button className="pager right" onClick={() => page(1)} aria-label="Scroll right">
+          ›
+        </button>
+      </div>
+    </section>
+  );
+}
+
 // --- Browse -----------------------------------------------------------------
 
 export function Browse({
@@ -1024,7 +1128,7 @@ export function Browse({
       // main process falls back to whatever was chosen for this film last time.
       await window.playback.play(titleId, { fromStart, tracks, episodeKey });
       setHover(null);
-      setOpen(null);
+      closeDetail();
     } catch (err) {
       // Without rendering this, a failed Play does nothing visible at all — the most
       // confusing possible outcome.
@@ -1064,6 +1168,17 @@ export function Browse({
     el: HTMLElement | null;
   } | null>(null);
   const [open, setOpen] = useState<TitleCard | null>(null);
+  /** The season a season card asked for; cleared with the dialog, so it never lingers. */
+  const [openSeason, setOpenSeason] = useState<number | undefined>();
+  const openDetail = (card: TitleCard, season?: number) => {
+    setHover(null);
+    setOpenSeason(season);
+    setOpen(card);
+  };
+  const closeDetail = () => {
+    setOpen(null);
+    setOpenSeason(undefined);
+  };
   const [scrolled, setScrolled] = useState(false);
 
   const load = useCallback(async () => {
@@ -1152,7 +1267,8 @@ export function Browse({
   /**
    * The billboard rotation.
    *
-   * It follows the "Recently Added" row, in that row's order, and moves on each time a
+   * It follows what was added most recently, films and shows together, newest first,
+   * and moves on each time a
    * trailer has been round once. That replaces the old rule, which was not a selection
    * at all: the first title `readdir` happened to return with artwork, which meant the
    * same film every launch forever.
@@ -1161,7 +1277,11 @@ export function Browse({
    * rectangle with text on it. The row's own order is otherwise preserved, so the
    * billboard shows you what arrived most recently, newest first.
    */
-  const recentIds = data.rows.find((r) => r.title === 'Recently Added')?.titleIds ?? [];
+  // Both Recently Added rows — films and shows — merged back into arrival order.
+  const recentIds = data.rows
+    .filter((r) => r.kind === 'recent')
+    .flatMap((r) => r.titleIds)
+    .sort((a, b) => (byId.get(b)?.addedAt ?? '').localeCompare(byId.get(a)?.addedAt ?? ''));
   const heroQueue = buildHeroQueue(recentIds, (id) => Boolean(byId.get(id)?.backdrop));
   const hero =
     (heroQueue.length ? byId.get(heroQueue[heroIndex % heroQueue.length]) : null) ??
@@ -1232,19 +1352,26 @@ export function Browse({
    * genre or franchise row filtered down to one is noise and goes, the same MIN_ROW
    * rule the main process applies. "TV Shows" is dropped from the TV view as redundant.
    */
-  const shelves = (data?.rows ?? []).map((row) => ({
+  const shelves: Shelf[] = (data?.rows ?? []).map((row) => ({
+    kind: row.kind,
     title: row.title,
+    subtitle: row.subtitle,
     cards: row.titleIds.map((id) => byId.get(id)).filter(Boolean) as TitleCard[],
   }));
-  const FIXED_ROWS = new Set(['Continue Watching', 'My List', 'Recently Added']);
+  // Rows that stand with one title: the fixed rows, and a show's own shelf — whose
+  // cards are its seasons, however many titles it holds.
+  const KEEP_WITH_ONE = new Set<ShelfKind>(['continue', 'my-list', 'recent', 'seasons']);
   const typedShelves = typeView
     ? shelves
-        .filter((row) => row.title !== 'TV Shows')
+        // The tab already says which kind; "Recently Added TV Shows" there repeats itself.
+        .map((row) => (row.kind === 'recent' ? { ...row, title: 'Recently Added' } : row))
         .map((row) => ({ ...row, cards: row.cards.filter((c) => c.type === typeView) }))
-        .filter((row) => row.cards.length >= (FIXED_ROWS.has(row.title) ? 1 : 2))
+        .filter((row) => row.cards.length >= (KEEP_WITH_ONE.has(row.kind) ? 1 : 2))
     : shelves;
 
-  const visibleRows = collapsed ? [{ title: resultTitle, cards: resultCards }] : typedShelves;
+  const visibleRows: Shelf[] = collapsed
+    ? [{ kind: 'results', title: resultTitle, cards: resultCards }]
+    : typedShelves;
 
   // Offered from what the library actually holds, never a fixed list — a pill that
   // cannot change the result set is a control that looks broken when you press it.
@@ -1514,7 +1641,7 @@ export function Browse({
                 {starting ? <IconSpinner /> : <IconPlay />}
                 <span>{starting ? 'Starting…' : playLabel(hero)}</span>
               </button>
-              <button className="info-button" onClick={() => setOpen(hero)}>
+              <button className="info-button" onClick={() => openDetail(hero)}>
                 <IconInfo />
                 <span>More Info</span>
               </button>
@@ -1528,19 +1655,26 @@ export function Browse({
       <TrailerHost />
 
       <div className={`rows${showHero ? '' : ' rows-bare'}`}>
-        {visibleRows.map((row) => (
-          <Row
-            key={row.title}
-            title={row.title}
-            cards={row.cards}
-            layout={collapsed ? 'grid' : 'row'}
-            onHover={(card, rect, el) => setHover({ card, rect, el })}
-            onOpen={(card) => {
-              setHover(null);
-              setOpen(card);
-            }}
-          />
-        ))}
+        {visibleRows.map((row) =>
+          row.kind === 'seasons' && row.cards[0] ? (
+            <SeasonShelf
+              key={`seasons:${row.cards[0].id}`}
+              card={row.cards[0]}
+              title={row.title}
+              subtitle={row.subtitle}
+              onOpenSeason={(season) => openDetail(row.cards[0], season)}
+            />
+          ) : (
+            <Row
+              key={`${row.kind}:${row.title}`}
+              title={row.title}
+              cards={row.cards}
+              layout={collapsed ? 'grid' : 'row'}
+              onHover={(card, rect, el) => setHover({ card, rect, el })}
+              onOpen={(card) => openDetail(card)}
+            />
+          ),
+        )}
 
         {/*
           * Say what happened AND what to do, rather than showing a blank page.
@@ -1584,10 +1718,7 @@ export function Browse({
           rect={hover.rect}
           anchor={hover.el}
           onLeave={() => setHover(null)}
-          onOpen={() => {
-            setOpen(hover.card);
-            setHover(null);
-          }}
+          onOpen={() => openDetail(hover.card)}
           onPlay={() => void play(hover.card.id)}
           onToggleList={() => void toggleList(hover.card)}
           starting={starting}
@@ -1603,7 +1734,8 @@ export function Browse({
       {open && (
         <DetailModal
           card={open}
-          onClose={() => setOpen(null)}
+          initialSeason={openSeason}
+          onClose={closeDetail}
           onPlay={(tracks, episodeKey) => void play(open.id, false, tracks, episodeKey)}
           onToggleList={() => void toggleList(open)}
           starting={starting}

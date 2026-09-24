@@ -61,6 +61,26 @@ export type NextUpCard = {
   offlineOn: string | null;
 };
 
+/** One season, as a card on its show's own shelf. */
+export type SeasonCard = {
+  season: number;
+  /** "Season 1950", "Miniseries", "Specials" — the episode list's own name for it. */
+  name: string;
+  /** Episodes on your drives. */
+  episodeCount: number;
+  /** "1950–1958", or a single year: from the episodes' air dates, else TMDB's season year. */
+  yearLabel?: string;
+  /** media:// URL of the season's own poster; null means the card wears the show's. */
+  poster: string | null;
+  watchedCount: number;
+  /** Where you are: next-up is in this season, and you have started the show. */
+  upNext: boolean;
+  /** At least one episode of it is reachable now. */
+  available: boolean;
+  /** When none is: the drive to plug in. */
+  offlineOn: string | null;
+};
+
 /** Show-only facts for tiles, the hover card and the billboard. */
 export type ShowSummary = {
   seasonCount: number;
@@ -81,6 +101,8 @@ export type ShowSummary = {
    * space out rather than printing the "No description" meant for unmatched titles.
    */
   episodesAsFilms: boolean;
+  /** Every owned season in order, Specials last — the cards on the show's shelf. */
+  seasons: SeasonCard[];
 };
 
 export type TitleCard = {
@@ -138,9 +160,25 @@ export type TitleCard = {
   inMyList: boolean;
 };
 
+/**
+ * Why a row exists. The renderer keys its behaviour on this — which rows survive a
+ * TV/Films tab with one title, which one the billboard follows — never on a title
+ * string: "Recently Added" became two rows, and every check against the old name
+ * would have quietly stopped matching.
+ */
+export type RowKind = 'continue' | 'my-list' | 'recent' | 'seasons' | 'collection' | 'genre';
+
+export type BrowseRow = {
+  kind: RowKind;
+  title: string;
+  /** One quiet line after the title: "2 Seasons · 114 Episodes · 1940–1958". */
+  subtitle?: string;
+  titleIds: string[];
+};
+
 export type BrowseData = {
   titles: TitleCard[];
-  rows: Array<{ title: string; titleIds: string[] }>;
+  rows: BrowseRow[];
   heroId: string | null;
 };
 
