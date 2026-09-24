@@ -75,6 +75,12 @@ export type ShowSummary = {
   yearLabel?: string;
   /** Null only for a show with no playable episode numbering. */
   nextUp: NextUpCard | null;
+  /**
+   * Described episode by episode from TMDB films (Tom and Jerry's shorts). There is no
+   * series synopsis to show — each episode has its own — so the detail view leaves the
+   * space out rather than printing the "No description" meant for unmatched titles.
+   */
+  episodesAsFilms: boolean;
 };
 
 export type TitleCard = {

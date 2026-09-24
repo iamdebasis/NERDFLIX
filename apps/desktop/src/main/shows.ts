@@ -156,6 +156,7 @@ export function showSummary(
       creators: title.creators,
       yearLabel,
       nextUp: nextUpCard,
+      episodesAsFilms: title.episodesAsFilms === true,
     },
     playable,
   };

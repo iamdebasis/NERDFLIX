@@ -779,7 +779,12 @@ function DetailModal({
                   {card.certification && <span className="cert">{card.certification}</span>}
                 </div>
                 {card.tagline && <p className="tagline">{card.tagline}</p>}
-                <p className="overview">{card.overview || 'No description available.'}</p>
+                {card.overview ? (
+                  <p className="overview">{card.overview}</p>
+                ) : (
+                  // A show told through its episodes' own synopses is not "undescribed".
+                  !card.show?.episodesAsFilms && <p className="overview">No description available.</p>
+                )}
               </div>
 
               <aside className="modal-side">
