@@ -94,7 +94,15 @@ export class MpvIpc extends EventEmitter {
 
     this.socket.setEncoding('utf8');
     this.socket.on('data', (chunk: string) => this.onData(chunk));
-    this.socket.on('error', (err) => this.emit('error', err));
+    /*
+     * Passed on only to someone listening. An EventEmitter 'error' nobody listens for is
+     * THROWN — and a player vanishing mid-request (EPIPE as IINA shuts down, reset as
+     * mpv exits) is routine, not fatal: 'close' follows and rejects whatever was
+     * pending. Measured: connecting to an IINA that was quitting took the process down.
+     */
+    this.socket.on('error', (err) => {
+      if (this.listenerCount('error') > 0) this.emit('error', err);
+    });
     this.socket.on('close', () => this.onClose());
   }
 

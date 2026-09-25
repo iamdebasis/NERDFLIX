@@ -38,6 +38,8 @@ export type MpvPropertyMap = {
   pause: boolean;
   'eof-reached': boolean;
   'core-idle': boolean;
+  /** No file loaded at all — a player whose window has closed, or one never used. */
+  'idle-active': boolean;
   'seeking': boolean;
   path: string | null;
   'media-title': string | null;

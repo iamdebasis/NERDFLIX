@@ -28,6 +28,7 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { access } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { MpvIpc, MpvIpcError } from './mpv-ipc.js';
 import type { MpvPropertyChange } from './mpv-ipc.js';
 import type {
@@ -54,7 +55,74 @@ export type IinaOptions = {
   socketPath?: string;
   cliPath?: string;
   onExit?: () => void;
+  /** How long to wait for IINA to open the file and answer for it. Tests shorten it. */
+  loadTimeoutMs?: number;
 };
+
+/**
+ * IINA opened the film, but no player on the socket would say it was playing it.
+ *
+ * Refused rather than tolerated: attaching to another player would record THAT player's
+ * position as this film's progress, and quit the wrong window when the next film starts.
+ */
+export class IinaOtherPlayerError extends Error {
+  constructor() {
+    super(
+      'The film opened in IINA, but Nerdflix could not reach the IINA window playing it, ' +
+        'so its progress will not be saved. Quit IINA (⌘Q) and press Play again.',
+    );
+    this.name = 'IinaOtherPlayerError';
+  }
+}
+
+/**
+ * Is the file a player reports the one we launched?
+ *
+ * Compared composed, because a name read off a macOS disk can come back decomposed
+ * ("é" as "e" + an accent), and tolerant of a file:// URL, which IINA may hand mpv.
+ */
+export function isSameMedia(reported: unknown, launched: string): boolean {
+  if (typeof reported !== 'string' || reported === '') return false;
+  const norm = (p: string) => {
+    let s = p;
+    if (s.startsWith('file://')) {
+      try {
+        s = decodeURIComponent(new URL(s).pathname);
+      } catch {
+        /* keep as given */
+      }
+    }
+    return s.normalize('NFC');
+  };
+  const a = norm(reported);
+  const b = norm(launched);
+  return a === b || basename(a) === basename(b);
+}
+
+/**
+ * How long a connected player may show NO file before it counts as someone else's.
+ *
+ * Every IINA program binds the same socket path, and `iina-cli` starts a new one per
+ * film while the last one — its window closed — can still be running, idle, holding
+ * the path. Connecting right after launch reaches THAT player first. A new IINA names
+ * its file within moments of creating the socket; a leftover never does.
+ */
+const STRANGER_MS = 3_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Resolve once `pid` no longer exists, or after `timeoutMs` — never throws. */
+async function waitForExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0); // signal 0: existence check only, nothing is sent
+    } catch {
+      return;
+    }
+    await sleep(100);
+  }
+}
 
 export class IinaNotConfiguredError extends Error {
   constructor(socketPath: string) {
@@ -103,6 +171,8 @@ export class IinaEngine implements PlaybackEngine {
   private readonly socketPath: string;
   private readonly observers = new Map<number, Observer>();
   private nextObserveId = 1;
+  /** The IINA process playing our film — libmpv runs inside it, so mpv's `pid` is IINA's. */
+  private playerPid: number | null = null;
 
   constructor(private readonly opts: IinaOptions = {}) {
     this.socketPath = opts.socketPath ?? DEFAULT_IINA_SOCKET;
@@ -149,58 +219,103 @@ export class IinaEngine implements PlaybackEngine {
 
     spawn(this.cli!, args, { stdio: 'ignore', detached: true }).unref();
 
-    // IINA has to launch, open the file and create the socket. Poll rather than
-    // guessing a fixed delay, because a cold start with a 60 GB file is not quick.
-    const deadline = Date.now() + 20_000;
+    /*
+     * IINA has to launch, open the file and create the socket. Poll rather than guess,
+     * because a cold start with a 60 GB file on a spinning disk is not quick.
+     *
+     * And CONFIRM who answered. The socket path is shared by every IINA program, and the
+     * previous film's IINA may still hold it — idle, window closed. Attaching to it
+     * reported "0x0, SDR, software decode, audio device did not open" for real HDR
+     * remuxes, recorded no progress for the film actually playing, and quit the wrong
+     * player when the next film started. A player that is not showing our file is
+     * dropped, and the path asked again until the new IINA has claimed it.
+     */
+    const deadline = Date.now() + (this.opts.loadTimeoutMs ?? 30_000);
+    let reachedAnother = false;
     while (Date.now() < deadline) {
+      let ipc: MpvIpc | null = null;
       try {
-        const ipc = new MpvIpc(this.socketPath);
-        await ipc.connect();
-        this.ipc = ipc;
-
-        ipc.on('property-change', (msg: MpvPropertyChange) => {
-          // mpv omits `data` entirely when a property becomes unavailable — as a file
-        // unloads, time-pos does exactly that. Callers are typed for `null`, and an
-        // `undefined` slipping through reached state/ as a missing position.
-        this.observers.get(msg.id)?.cb(msg.data ?? null);
-        });
-        // The socket closing means IINA closed the file — the same signal a bare mpv
-        // process exiting gives us, so the app can save progress and refresh.
-        ipc.on('close', () => {
-          this.ipc = null;
-          this.opts.onExit?.();
-        });
-
-        /**
-         * Wait for the FILE to be open, not just the socket.
-         *
-         * The socket appears when IINA's mpv starts, which can be before it has opened
-         * anything. Reading properties at that moment returns a blank player — 0x0,
-         * no codec, no audio device — and the status block reported that as fact.
-         */
-        await this.waitForFile();
-        return;
+        ipc = new MpvIpc(this.socketPath);
+        await ipc.connect(Math.max(250, Math.min(2_000, deadline - Date.now())));
+        if ((await this.confirmFile(ipc, path, deadline)) === 'ours') {
+          this.attach(ipc);
+          return;
+        }
+        reachedAnother = true;
       } catch {
-        await new Promise((r) => setTimeout(r, 400));
+        /* no socket yet — IINA is still starting */
       }
+      ipc?.close();
+      await sleep(300);
     }
 
-    throw new IinaNotConfiguredError(this.socketPath);
+    throw reachedAnother ? new IinaOtherPlayerError() : new IinaNotConfiguredError(this.socketPath);
   }
 
-  /** Poll until mpv reports real dimensions, meaning the file is genuinely open. */
-  private async waitForFile(timeoutMs = 15_000): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
+  /**
+   * Is this player showing the file we launched — and has it opened it?
+   *
+   * Waits for real dimensions, not just the name: a player that has only started to
+   * load returns a blank picture (0x0, no codec, no audio device), and the status block
+   * once printed exactly that as fact. A player that is ours but slow to open is still
+   * ours when the deadline arrives; playback is fine, only the report may be early.
+   */
+  private async confirmFile(ipc: MpvIpc, path: string, deadline: number): Promise<'ours' | 'other'> {
+    const connectedAt = Date.now();
+    let ours = false;
     while (Date.now() < deadline) {
-      try {
-        const w = await this.ipc?.getProperty<number>('width');
-        if (w && w > 0) return;
-      } catch {
-        /* not ready */
+      const reported = await ipc.getProperty<string>('path').catch(() => null);
+      if (typeof reported === 'string' && reported !== '') {
+        if (!isSameMedia(reported, path)) return 'other';
+        ours = true;
+        const width = await ipc.getProperty<number>('width').catch(() => 0);
+        if (width && width > 0) return 'ours';
+      } else if (Date.now() - connectedAt > STRANGER_MS) {
+        return 'other';
       }
-      await new Promise((r) => setTimeout(r, 200));
+      await sleep(200);
     }
-    // Fall through rather than throwing: playback is fine, only the report suffers.
+    return ours ? 'ours' : 'other';
+  }
+
+  /** Take over a confirmed player: forward its events, and notice when it is done. */
+  private attach(ipc: MpvIpc): void {
+    this.ipc = ipc;
+    void ipc
+      .getProperty<number>('pid')
+      .then((pid) => {
+        if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) this.playerPid = pid;
+      })
+      .catch(() => {});
+
+    ipc.on('property-change', (msg: MpvPropertyChange) => {
+      // mpv omits `data` entirely when a property becomes unavailable — as a file
+      // unloads, time-pos does exactly that. Callers are typed for `null`, and an
+      // `undefined` slipping through reached state/ as a missing position.
+      this.observers.get(msg.id)?.cb(msg.data ?? null);
+    });
+    // The socket closing means IINA closed the file — the same signal a bare mpv
+    // process exiting gives us, so the app can save progress and refresh.
+    ipc.on('close', () => {
+      this.ipc = null;
+      this.opts.onExit?.();
+    });
+
+    /*
+     * Closing IINA's window does NOT close the socket: IINA keeps running, idle, still
+     * holding the path — the leftover the next film then reached first, one more per
+     * film watched. When our player has had no file for a moment, ask it to quit, which
+     * ends that IINA and closes the socket (so `onExit` fires, as for bare mpv). The
+     * delay is so a momentary gap between files is not mistaken for a closed window.
+     */
+    let idleTimer: NodeJS.Timeout | undefined;
+    this.observe('idle-active', (idle) => {
+      clearTimeout(idleTimer);
+      if (idle !== true) return;
+      idleTimer = setTimeout(() => {
+        if (this.ipc === ipc) void ipc.command(['quit']).catch(() => {});
+      }, 1_500);
+    });
   }
 
   private require(): MpvIpc {
@@ -269,5 +384,16 @@ export class IinaEngine implements PlaybackEngine {
     }
     this.ipc?.close();
     this.ipc = null;
+
+    /*
+     * And wait until that IINA has actually gone, before the next film is launched —
+     * bare mpv's dispose waits the same way. An IINA that is still shutting down can
+     * still answer on the socket, so the next film's connection could reach it instead
+     * of the new player; once it has exited it cannot. (It leaves its socket FILE
+     * behind, dead: connecting to that fails at once and is simply retried.)
+     */
+    const pid = this.playerPid;
+    this.playerPid = null;
+    if (pid !== null) await waitForExit(pid, 5_000);
   }
 }

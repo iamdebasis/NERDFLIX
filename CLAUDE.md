@@ -95,7 +95,7 @@ guess.
   Jerry shorts) are described episode by episode. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 479 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 489 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -134,6 +134,31 @@ appears when IINA's mpv starts, which can be before it has opened anything, and 
 then reports a blank player (0x0, no codec, "audio device did not open") as fact.
 `readPlaybackStatus` retries for the same reason — properties populate asynchronously,
 retrying is cheap, printing a confident lie is not.
+
+**And it only attaches to the player showing OUR file** (`confirmFile`, `isSameMedia`).
+`iina-cli` starts a separate IINA program per film, every one binds the same socket
+path, and IINA does not quit when its window closes — so the previous film's IINA sat
+idle holding the path, and the engine attached to IT. Observed on the user's Mac: every
+HDR remux reported "0x0 · SDR source · software decode · audio device did not open",
+progress was tracked on the wrong (empty) player, and starting the next film quit the
+wrong IINA, so idle IINAs piled up. Now: a player naming a different file, or no file
+for `STRANGER_MS`, is dropped and the path asked again; if no player will say it is
+ours, `IinaOtherPlayerError` — never attach to another player, whose position would be
+recorded as this film's. Three more parts, each found on real IINA:
+- **When our film's window closes, that IINA is told to quit** (`idle-active`, after a
+  1.5s grace). Otherwise it lingers, and the socket never closes, so `onExit` never
+  fired for IINA. Verified: IINA exits 1.6s after the file stops, and the app hears it.
+- **`dispose()` waits until that IINA has exited** before the next film launches, as
+  bare mpv's does — a quitting IINA can still answer on the socket. IINA leaves its
+  socket FILE behind, dead; connecting to it fails at once and is retried.
+- **A socket error is never thrown.** `MpvIpc` passes 'error' on only to a listener;
+  an unheard EventEmitter 'error' is thrown, and an EPIPE from a quitting IINA took the
+  process down during testing. 'close' already rejects whatever was pending.
+
+Measured through the app on real IINA, with two leftover idle IINAs still running: an
+SDR clip then a 4K HDR10 clip started in 1.5s and 1.8s (were 4.0s and 26.3s), both
+reported correctly. `iina.test.ts` fakes the players over a real socket; its key
+tests were checked to fail against the old "whoever answers first".
 
 THE ONE MANUAL STEP, and it cannot be avoided: `iina-cli` deliberately ignores
 `--input-*`, so the IPC socket cannot be passed per launch. The user must set
