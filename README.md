@@ -72,7 +72,7 @@ it claims to show.
 | **Films and shows, kept apart.** *Recently Added Movies* and *Recently Added TV Shows* are separate rows — "what shall I watch tonight" and "which series did I add" are different questions. TV Shows and Films tabs sit beside Browse. | ![Recently Added Movies and Recently Added TV Shows](docs/screenshots/13-films-and-shows.jpg) |
 | ![A franchise row in release order](docs/screenshots/04-collections.jpg) | **Franchises group themselves.** Own two or more films of a collection and they get a row of their own, in release order, above the genres. No tagging, no folders, no network calls. |
 
-### TV — new in 1.0.1
+### TV
 
 |  |  |
 |---|---|
