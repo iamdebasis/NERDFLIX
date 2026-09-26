@@ -155,6 +155,9 @@ export function buildMpvArgs(opts: MpvConfigOptions): string[] {
         ]),
     // Do not read the user's ~/.config/mpv; our config must be reproducible.
     '--no-config',
+    // Nor mpv's per-file memory ("watch later"), which is applied over our own start
+    // position and tracks. The same fault played a commentary through IINA; see iina.ts.
+    '--resume-playback=no',
     // Keep mpv off our stdin/stdout so the CLI can own the terminal.
     '--no-terminal',
     '--msg-level=all=warn',

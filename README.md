@@ -85,7 +85,7 @@ it claims to show.
 |  |  |
 |---|---|
 | ![A film's detail view](docs/screenshots/06-detail.jpg) | **The truth about the file.** The logo over the trailer, and what the file really is — resolution, HDR format, audio layout and the real bitrate, all read from the stream, never from the filename. |
-| **Choose the track before you start.** A remux carries the feature mix, commentaries and dozens of subtitle tracks. Pick them here — commentaries labelled as such — rather than hunting through a player menu while the opening plays. | ![The track picker with a commentary chosen](docs/screenshots/09-track-picker.jpg) |
+| **Choose the track before you start.** A remux carries the feature mix, commentaries and dozens of subtitle tracks. Leave it on *Automatic* and the best soundtrack plays (lossless, then Atmos, never a commentary), and the picker names it. Or pick one here, commentaries labelled as such, rather than hunting through a player menu while the opening plays. | ![The track picker with a commentary chosen](docs/screenshots/09-track-picker.jpg) |
 
 ### Finding things
 

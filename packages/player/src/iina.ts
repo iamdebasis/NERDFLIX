@@ -200,7 +200,18 @@ export class IinaEngine implements PlaybackEngine {
      * The socket only exists while IINA has a file open — it is created by IINA's own
      * mpv instance at startup, so there is nothing to connect to beforehand.
      */
-    const args = ['--no-stdin', '--keep-running'];
+    /**
+     * `resume-playback=no`: this launch plays exactly what Nerdflix asks for.
+     *
+     * IINA remembers each file's last position and tracks (its "watch later" files)
+     * and applies them OVER the options it was launched with. Measured on IINA 1.4.4:
+     * with a remembered commentary, `--mpv-aid=1` still played the commentary; with a
+     * remembered position of 20s, a launch asking for no start position began at 20s,
+     * so "Play from beginning" could resume mid-film. Nerdflix keeps its own position and
+     * track choices in state/, so IINA's copy only ever contradicts them. Launched from
+     * Finder, IINA still remembers as it always did.
+     */
+    const args = ['--no-stdin', '--keep-running', '--mpv-resume-playback=no'];
     if (opts.startAt !== undefined && opts.startAt > 0) {
       // `--mpv-` is the documented passthrough for ordinary mpv options.
       args.push(`--mpv-start=${Math.floor(opts.startAt)}`);
@@ -210,8 +221,7 @@ export class IinaEngine implements PlaybackEngine {
      *
      * It has to be set at LAUNCH rather than over IPC after the fact: switching audio
      * a second into playback is audible, and IINA has already opened the default
-     * track's device by then. Unset means unset — IINA applies its own preferences,
-     * which is what should happen when nobody has chosen.
+     * track's device by then. Unset subtitles stay unset, so IINA's preferences apply.
      */
     if (opts.audioTrack !== undefined) args.push(`--mpv-aid=${opts.audioTrack}`);
     if (opts.subtitleTrack !== undefined) args.push(`--mpv-sid=${opts.subtitleTrack}`);

@@ -290,6 +290,11 @@ export type TrackChoice = { audio?: number; subtitle?: number | 'no' };
 export type TrackInfo = {
   audio: TrackOption[];
   subtitles: TrackOption[];
+  /**
+   * The audio track "Automatic" plays — the best soundtrack, never a commentary. Shown
+   * beside "Automatic" so the picker says what it will do rather than hiding it.
+   */
+  automaticAudio: number | null;
   /** What was chosen last time, if anything. */
   choice: TrackChoice | null;
 };
@@ -304,9 +309,9 @@ export type PlayOptions = {
   episodeKey?: string;
   fromStart?: boolean;
   /**
-   * Passed to the player only for the fields actually set. Sending nothing lets mpv
-   * and IINA apply their own selection rules, which is what happens for anyone who
-   * never opens the picker — so the feature cannot change playback by existing.
+   * What the user chose, field by field. An unchosen audio track is decided in the main
+   * process (the best soundtrack, never a commentary); unchosen subtitles are left to
+   * the player's own rules.
    */
   tracks?: TrackChoice;
 };

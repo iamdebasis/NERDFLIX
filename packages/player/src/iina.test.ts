@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:net';
-import { mkdtemp, rm, unlink } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -230,6 +230,42 @@ describe('a player vanishing mid-request', () => {
         assert.doesNotThrow(() => socket.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })));
       } finally {
         ipc.close();
+        player.close();
+      }
+    });
+  });
+});
+
+describe('a launch plays what Nerdflix asks for, not what IINA remembers', () => {
+  /**
+   * IINA applies its per-file memory OVER its launch options. Measured on IINA 1.4.4
+   * with a remembered commentary: `--mpv-aid=1` still played the commentary, and a
+   * launch with no start position resumed at IINA's remembered 20s. Only
+   * `resume-playback=no` made both land as asked.
+   */
+  test("every launch turns IINA's memory off, and still passes the track and position", async () => {
+    await withSocket(async (socketPath) => {
+      const dir = join(socketPath, '..');
+      const cli = join(dir, 'fake-iina-cli');
+      const argsFile = join(dir, 'args.txt');
+      await writeFile(cli, `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\n`);
+      await chmod(cli, 0o755);
+      const player = await fakePlayer(socketPath, { path: FILM, width: 3840, height: 2160 });
+      const engine = new IinaEngine({ socketPath, cliPath: cli, loadTimeoutMs: 5_000 });
+      try {
+        await engine.load(FILM, { audioTrack: 1, startAt: 95 });
+        // iina-cli is spawned detached and not waited for, so its record may lag.
+        let recorded = '';
+        for (let i = 0; i < 40 && !recorded.endsWith('\n'); i++) {
+          recorded = await readFile(argsFile, 'utf8').catch(() => '');
+          if (!recorded) await new Promise((r) => setTimeout(r, 50));
+        }
+        const args = recorded.trim().split('\n');
+        assert.ok(args.includes('--mpv-resume-playback=no'), `IINA's memory left on: ${args.join(' ')}`);
+        assert.ok(args.includes('--mpv-aid=1'));
+        assert.ok(args.includes('--mpv-start=95'));
+      } finally {
+        await engine.dispose();
         player.close();
       }
     });

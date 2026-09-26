@@ -95,7 +95,7 @@ guess.
   Jerry shorts) are described episode by episode. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 510 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 519 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -352,11 +352,34 @@ real remux rather than assumed: ffprobe's four audio streams for Cars came back 
 mpv as `--aid=1..4`, same order, same titles, and `--aid=3 --sid=2` selected exactly
 the commentary and the SDH track the picker labels 3 and 2.
 
-**Unset means unset.** A field the user has not chosen is never sent, so mpv and IINA
-apply their own rules — preferred language, forced flags, the container's default
-disposition. Overriding those with a guess would change playback for everyone who
-never opens the picker, which is not a trade a new feature gets to make. "Automatic" is
-therefore a real option in the list, not a pre-selected default track.
+**"Automatic" audio is the best soundtrack, decided by us and SENT** (`bestAudioTrack`
+in `main/tracks.ts`; the user's decision, 2026-09-26). It replaced "unset means unset",
+which left the choice to the player. Reported: The Last Jedi started on the director's
+commentary with the picker on Automatic. The file was fine (bare mpv picks the default
+TrueHD Atmos). IINA had remembered track #3 for that file, and for five other films
+where #3 is a commentary, and restored it.
+
+The rule: never a commentary or an audio description unless nothing else exists, then
+lossless > Atmos/DTS:X > channels > bitrate (only when both are known) > the default
+flag > disc order. Quality comes BEFORE the default flag, for real reasons: The Rise of
+Skywalker's remux flags a Russian iTunes AC-3 as default ahead of the English TrueHD
+"Original", and The Mandalorian and Grogu flags Hindi and English both. Over the real
+library it differs from the file's default in exactly three films (those two, and Back
+to the Future, whose default is the 1991 stereo mix) and picks a commentary in none.
+Language is NOT a factor beyond that. There is no language preference to read, and a
+choice made once in the picker is remembered per title. The picker's first option says
+what Automatic resolves to ("Automatic — TrueHD Atmos 7.1"), so it never hides a
+decision. Subtitles left on Automatic are still NOT sent, so the player's rules apply.
+
+**IINA's per-file memory is switched off for our launches** (`--mpv-resume-playback=no`;
+bare mpv gets `--resume-playback=no` beside `--no-config`). IINA applies its "watch
+later" memory OVER its launch options. Measured on IINA 1.4.4 with a remembered
+commentary at 20s: `--mpv-aid=1` still played the commentary, and a launch with no
+start position began at 20s. So a choice made in the picker, and "Play from beginning",
+could both be silently overridden. With the flag, every case landed as asked. Verified
+through the real UI: Automatic played track 1 from 0s over that memory, and choosing
+track 2 played track 2. `iina.test.ts` fails if the flag is dropped. IINA launched from
+Finder still remembers, as it always did. Nothing of IINA's is deleted.
 
 **The choice is remembered in `state/`**, and `library:play` falls back to it when no
 choice is passed. The picker lives in the detail view, but Play also exists on the

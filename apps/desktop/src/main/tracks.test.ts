@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   audioOptions,
+  bestAudioTrack,
   hasTrackChoice,
   isCommentary,
   languageName,
@@ -186,5 +187,79 @@ describe('isCommentary', () => {
     assert.ok(isCommentary({ title: 'Isolated Score' }));
     assert.ok(!isCommentary({ title: 'TrueHD Atmos 7.1' }));
     assert.ok(!isCommentary({}));
+  });
+});
+
+/**
+ * What "Automatic" plays. Every layout here is a real one from the library, copied from
+ * its ffprobe record: title, codec string, channels, bitrate and default flag.
+ */
+describe('the best soundtrack is chosen, never a commentary', () => {
+  const truehdAtmos = { codec: 'truehd (Dolby TrueHD + Dolby Atmos)', channels: 8, objectAudio: true };
+
+  test('The Last Jedi: TrueHD Atmos, not the commentary IINA restored (the report)', () => {
+    const lastJedi = [
+      audio({ ...truehdAtmos, lang: 'eng', title: 'TrueHD Atmos 7.1', isDefault: true }),
+      audio({ lang: 'eng', title: 'AC-3 7.1', bitrateKbps: 640 }),
+      audio({ channels: 2, lang: 'eng', title: 'Commentary by writer/director Rian Johnson', bitrateKbps: 192 }),
+    ];
+    assert.equal(bestAudioTrack(lastJedi), 1);
+  });
+
+  test('The Rise of Skywalker: the English original over a Russian track flagged default', () => {
+    const skywalker = [
+      audio({ lang: 'rus', title: 'iTunes', bitrateKbps: 384, isDefault: true }),
+      audio({ ...truehdAtmos, lang: 'eng', title: 'Original' }),
+      audio({ lang: 'eng', bitrateKbps: 640 }),
+    ];
+    assert.equal(bestAudioTrack(skywalker), 2);
+  });
+
+  test('Back to the Future: Atmos 7.1 over the default 1991 stereo mix, both lossless', () => {
+    const bttf = [
+      audio({ codec: 'flac', channels: 2, lang: 'eng', title: 'Original Dolby Stereo Mix (1991 LaserDisc)', isDefault: true }),
+      audio({ ...truehdAtmos, lang: 'eng', title: 'TrueHD Atmos 7.1' }),
+      audio({ lang: 'eng', title: 'Compatibility track 5.1', bitrateKbps: 448 }),
+      audio({ channels: 2, lang: 'eng', title: 'Q&A Commentary by director Robert Zemeckis', bitrateKbps: 192 }),
+    ];
+    assert.equal(bestAudioTrack(bttf), 2);
+  });
+
+  test('Rogue One: DTS-HD MA is lossless — ahead of lossy dubs', () => {
+    const rogueOne = [
+      audio({ codec: 'dts (DTS-HD MA)', channels: 8, lang: 'eng', isDefault: true }),
+      audio({ lang: 'fre', bitrateKbps: 640 }),
+      audio({ lang: 'spa', bitrateKbps: 640 }),
+    ];
+    assert.equal(bestAudioTrack(rogueOne), 1);
+  });
+
+  test('Tom and Jerry: two equal mono tracks, one bitrate unknown — the default stands', () => {
+    const tomAndJerry = [
+      audio({ codec: 'aac (LC)', channels: 1, lang: 'eng', title: 'Mono', isDefault: true }),
+      audio({ channels: 1, lang: 'eng', title: 'Mono', bitrateKbps: 640 }),
+    ];
+    assert.equal(bestAudioTrack(tomAndJerry), 1);
+  });
+
+  test('a commentary is never picked — even flagged default, even with more channels', () => {
+    assert.equal(
+      bestAudioTrack([
+        audio({ channels: 6, title: 'Commentary with the cast', isDefault: true }),
+        audio({ channels: 2, title: 'Feature' }),
+      ]),
+      2,
+    );
+    assert.equal(bestAudioTrack([audio({ title: 'English Descriptive Audio', isDefault: true }), audio({ channels: 2 })]), 2);
+  });
+
+  test('a file of nothing but commentary still plays something; a file with no audio, nothing', () => {
+    assert.equal(bestAudioTrack([audio({ title: 'Commentary' })]), 1);
+    assert.equal(bestAudioTrack([]), undefined);
+    assert.equal(bestAudioTrack(undefined), undefined);
+  });
+
+  test('a full tie goes to disc order', () => {
+    assert.equal(bestAudioTrack([audio(), audio()]), 1);
   });
 });

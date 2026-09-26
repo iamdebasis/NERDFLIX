@@ -376,6 +376,7 @@ function TrackSelect({
   value,
   onChange,
   offLabel,
+  automatic,
 }: {
   label: string;
   options: TrackOption[];
@@ -384,7 +385,10 @@ function TrackSelect({
   onChange: (value: number | 'no' | undefined) => void;
   /** Subtitles can be switched off, which is a different thing from not choosing. */
   offLabel?: string;
+  /** The option "Automatic" resolves to, when the app decides rather than the player. */
+  automatic?: number | null;
 }) {
+  const auto = automatic != null ? options.find((o) => o.id === automatic) : undefined;
   return (
     <label className="track-select">
       <span className="track-select-label">{label}</span>
@@ -395,9 +399,9 @@ function TrackSelect({
           onChange(v === '' ? undefined : v === 'no' ? 'no' : Number(v));
         }}
       >
-        {/* Not a track: it means "say nothing to the player", which is what happens
-            for anyone who never opens this. */}
-        <option value="">Automatic</option>
+        {/* Not a track: "not chosen". For audio the app then plays the best
+            soundtrack, and says which; subtitles are left to the player. */}
+        <option value="">{auto ? `Automatic — ${auto.label}` : 'Automatic'}</option>
         {offLabel && <option value="no">{offLabel}</option>}
         {options.map((o) => (
           <option key={o.id} value={o.id}>
@@ -752,6 +756,7 @@ function DetailModal({
                     label="Audio"
                     options={tracks.audio}
                     value={audio}
+                    automatic={tracks.automaticAudio}
                     // No "off" option is offered for audio, so 'no' cannot arrive —
                     // narrowed here rather than cast, so adding one later is a type
                     // error instead of a silently ignored value.

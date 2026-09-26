@@ -41,7 +41,7 @@ import {
   type PlaybackStatus,
 } from '@nfl/player';
 import type { PlayOptions, ShowEpisodes, TrackChoice, TrackInfo } from '../shared/types.js';
-import { audioOptions, subtitleOptions, trackOptionsFor, validTracksFor } from './tracks.js';
+import { audioOptions, bestAudioTrack, subtitleOptions, trackOptionsFor, validTracksFor } from './tracks.js';
 import { episodeToPlay, showEpisodes, type ShowContext } from './shows.js';
 
 type Engine = ExternalMpvEngine | IinaEngine;
@@ -75,12 +75,11 @@ async function chooseEngineKind(): Promise<'iina' | 'mpv'> {
 }
 
 /**
- * Only the fields the user actually chose.
+ * Only the fields that are set.
  *
- * An unset field must stay unset rather than becoming a default, because mpv and IINA
- * each have their own selection rules — preferred language, forced flags, the
- * container's default disposition — and overriding them with a guess would change
- * playback for everyone who never opens the picker.
+ * Audio is always set by the time it gets here: an unchosen audio track is decided by
+ * `bestAudioTrack`, because the players' own rule ended on a commentary (see tracks.ts).
+ * Subtitles unchosen stay unset, and the player applies its own rules to them.
  */
 function trackLoadOptions(tracks: TrackChoice | undefined): {
   audioTrack?: number;
@@ -154,11 +153,18 @@ export function registerPlaybackIpc(deps: Deps): void {
       return {
         audio: audioOptions(media),
         subtitles: subtitleOptions(media),
+        automaticAudio: bestAudioTrack(media?.audio) ?? null,
         choice: await deps.state.getTracks(id),
       };
     }
     const { audio, subtitles } = trackOptionsFor(title, versionIndex);
-    return { audio, subtitles, choice: await deps.state.getTracks(id) };
+    const media = title.media[versionIndex] ?? title.media[0];
+    return {
+      audio,
+      subtitles,
+      automaticAudio: bestAudioTrack(media?.audio) ?? null,
+      choice: await deps.state.getTracks(id),
+    };
   });
 
   /** Seasons and episodes, when a show's detail view opens. */
@@ -285,7 +291,12 @@ export function registerPlaybackIpc(deps: Deps): void {
 
       const displayTitle = target.displayTitle;
       // A remembered track this file does not have would mean silent playback.
-      const playTracks = validTracksFor(chosenTracks, target.media);
+      const valid = validTracksFor(chosenTracks, target.media);
+      // "Automatic" audio is the best soundtrack, decided here and sent — never left to
+      // the player, which restored a commentary from its own memory of the file.
+      const autoAudio = valid?.audio === undefined ? bestAudioTrack(target.media.audio) : undefined;
+      const playTracks: TrackChoice | undefined =
+        autoAudio !== undefined ? { ...valid, audio: autoAudio } : valid;
 
       // A fresh session per film. Reusing one idle instance saves ~250ms of startup
       // but inherits the previous window's fullscreen state and size, which is more

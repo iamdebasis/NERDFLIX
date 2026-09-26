@@ -75,6 +75,59 @@ export function isCommentary(track: { title?: string }): boolean {
   return /commentar|interview|isolated score/i.test(track.title ?? '');
 }
 
+/** A track made for listening ALONGSIDE the film, not the film's sound. */
+function isSecondaryAudio(track: { title?: string }): boolean {
+  return isCommentary(track) || /audio description|descriptive|described video/i.test(track.title ?? '');
+}
+
+type Audio = MediaFile['audio'][number];
+
+/** Lossless, read from ffprobe's codec and profile — never from the filename (rule 3). */
+function isLossless(a: Audio): boolean {
+  const codec = a.codec.split(' ')[0].toLowerCase();
+  return ['truehd', 'mlp', 'flac', 'alac'].includes(codec) || codec.startsWith('pcm_') || /DTS-HD MA/i.test(a.codec);
+}
+
+/** Atmos or DTS:X, as ffprobe's profile names them. */
+const isImmersive = (a: Audio): boolean => /atmos|dts:?x/i.test(a.codec);
+
+/**
+ * What "Automatic" plays: the film's best soundtrack. The value is mpv's `aid`.
+ *
+ * Decided here and SENT, not left to the player. Left to IINA, a film played the
+ * director's commentary: IINA remembers each file's last audio track and restored #3
+ * for six films on the real library. The file's own default flag is not the answer
+ * either. The Rise of Skywalker's remux flags a Russian iTunes AC-3 as default, ahead
+ * of the English TrueHD Atmos marked "Original".
+ *
+ * So: never a commentary or an audio description (unless that is all there is). Then
+ * lossless, then Atmos/DTS:X, then channels, then bitrate where both are known, and
+ * only then the default flag, and finally disc order. Back to the Future is the one
+ * real case where this overrides the release's default: it flags the 1991 stereo mix,
+ * and the Atmos 7.1 is picked. That mix stays one choice away in the picker.
+ */
+export function bestAudioTrack(audio: readonly Audio[] | undefined): number | undefined {
+  if (!audio?.length) return undefined;
+  const indexed = audio.map((a, i) => ({ a, i }));
+  const main = indexed.filter(({ a }) => !isSecondaryAudio(a));
+  const pool = main.length ? main : indexed;
+
+  const better = (x: Audio, y: Audio): number => {
+    const byFlag = (f: (a: Audio) => boolean) => Number(f(y)) - Number(f(x));
+    return (
+      byFlag(isLossless) ||
+      byFlag(isImmersive) ||
+      y.channels - x.channels ||
+      // An unknown bitrate (TrueHD, AAC) says nothing, so it cannot lose on it.
+      (x.bitrateKbps !== undefined && y.bitrateKbps !== undefined ? y.bitrateKbps - x.bitrateKbps : 0) ||
+      byFlag((a) => a.isDefault)
+    );
+  };
+
+  const [best] = [...pool].sort((x, y) => better(x.a, y.a) || x.i - y.i);
+  return mpvTrackId(best.i);
+}
+
 /** Long disc-authored names are a paragraph; the list needs a line. */
 function clamp(text: string, max = 48): string {
   return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
