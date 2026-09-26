@@ -11,7 +11,7 @@ import { constants, watch, type FSWatcher } from 'node:fs';
 import { access, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { VolumeStoreSchema, type LibraryRoot } from '../schema/index.js';
 
@@ -58,11 +58,36 @@ export type DiskInfo = {
   readOnly: boolean;
 };
 
-/** Read volume identity via diskutil. Returns empty info off macOS. */
+/**
+ * The mount point of the volume holding `path`.
+ *
+ * `df -P` answers for any path; `diskutil info` only for a mount point or a device.
+ */
+async function mountPointOf(path: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await exec('df', ['-P', path]);
+    // Filesystem  512-blocks  Used  Available  Capacity  Mounted-on — and the mount
+    // point is everything after the capacity column, because it may contain spaces.
+    return stdout.trim().split('\n')[1]?.match(/^\S+\s+\d+\s+\d+\s+\d+\s+\d+%\s+(.+)$/)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the identity of the volume a path lives on. Returns empty info off macOS.
+ *
+ * Asks about the VOLUME, not the path. `diskutil info` fails for anything that is not a
+ * mount point, and it used to be handed the library folder itself — so every library
+ * that was a folder on a drive (`/Volumes/XBOXCapture/MOVIEX`) or on the Mac
+ * (`~/Documents/DOC`) was paired with no volume UUID at all, which left one sentinel
+ * file as the only proof the drive was there.
+ */
 export async function inspectVolume(path: string): Promise<DiskInfo> {
   if (process.platform !== 'darwin') return { removable: false, readOnly: false };
+  const mount = await mountPointOf(path);
   try {
-    const { stdout } = await exec('diskutil', ['info', '-plist', path], {
+    const { stdout } = await exec('diskutil', ['info', '-plist', mount ?? path], {
       maxBuffer: 4 * 1024 * 1024,
     });
     const pick = (key: string): string | undefined => {
@@ -75,14 +100,28 @@ export async function inspectVolume(path: string): Promise<DiskInfo> {
     return {
       volumeUUID: pick('VolumeUUID'),
       fileSystem: pick('FilesystemName') ?? pick('FilesystemType'),
-      mountPoint: pick('MountPoint'),
+      mountPoint: pick('MountPoint') || mount,
       removable: flag('Removable') || flag('RemovableMedia') || flag('Ejectable'),
       readOnly: !flag('WritableVolume'),
     };
   } catch {
-    return { removable: false, readOnly: false };
+    // A NAS share, say, which diskutil will not describe: the mount point still helps.
+    return { mountPoint: mount, removable: false, readOnly: false };
   }
 }
+
+/** The library folder's path inside its volume, when the volume's mount point contains it. */
+export function volumePathOf(path: string, mountPoint?: string): string | undefined {
+  if (!mountPoint) return undefined;
+  if (path === mountPoint) return '';
+  const prefix = mountPoint.endsWith('/') ? mountPoint : `${mountPoint}/`;
+  return path.startsWith(prefix) ? relative(mountPoint, path) : undefined;
+}
+
+const exists = (p: string) => access(p).then(
+  () => true,
+  () => false,
+);
 
 /** Find where a known volume UUID is mounted right now. */
 export async function findByUUID(uuid: string): Promise<string | null> {
@@ -151,7 +190,16 @@ export class VolumeManager {
   constructor(
     private readonly storePath: string,
     private readonly probeTimeoutMs = 2000,
+    /** Tests stand in for diskutil and /Volumes; the app uses the real ones. */
+    private readonly deps: { inspect?: typeof inspectVolume; findByUUID?: typeof findByUUID } = {},
   ) {}
+
+  private inspect(path: string): Promise<DiskInfo> {
+    return (this.deps.inspect ?? inspectVolume)(path);
+  }
+
+  /** Writes queue: two probes repairing the same record must not race over the file. */
+  private writing: Promise<void> = Promise.resolve();
 
   async load(): Promise<LibraryRoot[]> {
     if (this.loaded) return this.roots;
@@ -165,7 +213,13 @@ export class VolumeManager {
     return this.roots;
   }
 
-  private async persist(): Promise<void> {
+  private persist(): Promise<void> {
+    const run = this.writing.then(() => this.writeNow());
+    this.writing = run.catch(() => {});
+    return run;
+  }
+
+  private async writeNow(): Promise<void> {
     await mkdir(dirname(this.storePath), { recursive: true });
     const tmp = `${this.storePath}.tmp`;
     await writeFile(
@@ -189,9 +243,8 @@ export class VolumeManager {
     const s = await stat(path);
     if (!s.isDirectory()) throw new Error(`${path} is not a directory`);
 
-    const info = await inspectVolume(path);
-    // A sentinel is any file we can re-check later to prove the mount is really ours
-    // and not an empty directory left behind where the drive used to be.
+    const info = await this.inspect(path);
+    // A hint that the folder is really there — see `identify` for why only a hint.
     const sentinel = await pickSentinel(path);
 
     /**
@@ -203,7 +256,12 @@ export class VolumeManager {
      * recognised again. An identity file from a pre-release build (`.netflix-local/`)
      * is ignored; no released version ever wrote one.
      */
-    const id = deriveVolumeId(path, info);
+    //
+    // Re-pairing a folder already paired keeps its id: older pairings derived it with
+    // no volume UUID (diskutil was never asked about the volume), and deriving it
+    // afresh now would give the same folder a new id and orphan every sighting of it.
+    const sameFolder = this.roots.find((r) => r.path === path);
+    const id = sameFolder?.id ?? deriveVolumeId(path, info);
     const resolvedLabel = label ?? path.split('/').filter(Boolean).pop() ?? path;
 
     /**
@@ -228,6 +286,7 @@ export class VolumeManager {
       borrowed: false,
       volumeUUID: info.volumeUUID,
       fileSystem: info.fileSystem,
+      volumePath: volumePathOf(path, info.mountPoint),
       sentinel,
       addedAt: new Date().toISOString(),
     };
@@ -258,57 +317,122 @@ export class VolumeManager {
   }
 
   /**
-   * Check one root. Tries the recorded path first, then relocates by UUID.
-   * Always bounded by the probe timeout.
+   * Is the library in reach, and where? Tries the recorded path first, then finds the
+   * drive by UUID wherever it is mounted now. Always bounded by the probe timeout.
    */
   async probe(root: LibraryRoot): Promise<VolumeState> {
     const started = Date.now();
-
-    const check = async (base: string): Promise<boolean> => {
-      const target = root.sentinel ? join(base, root.sentinel) : base;
-      await access(target);
-      return true;
-    };
+    const state = (status: VolumeStatus, resolvedPath?: string): VolumeState => ({
+      root,
+      status,
+      resolvedPath,
+      probeMs: Date.now() - started,
+      ...(status === 'offline' ? { error: 'not reachable' } : {}),
+    });
 
     try {
-      await withTimeout(check(root.path), this.probeTimeoutMs, root.label);
-      return { root, status: 'online', resolvedPath: root.path, probeMs: Date.now() - started };
+      const here = await withTimeout(this.identify(root, root.path), this.probeTimeoutMs, root.label);
+      if (here === 'ours') return state('online', root.path);
     } catch {
-      /* fall through to UUID relocation */
+      /* not answering in time — a sleeping NAS; try elsewhere */
     }
 
     if (root.volumeUUID) {
       try {
-        const found = await withTimeout(
-          findByUUID(root.volumeUUID),
-          this.probeTimeoutMs * 3, // scanning /Volumes is slower than one access()
+        const mount = await withTimeout(
+          (this.deps.findByUUID ?? findByUUID)(root.volumeUUID),
+          this.probeTimeoutMs * 3, // scanning /Volumes is slower than one stat()
           `${root.label} (relocate)`,
         );
-        if (found) {
-          return {
-            root,
-            status: 'relocated',
-            resolvedPath: found,
-            probeMs: Date.now() - started,
-          };
+        // The library FOLDER inside the drive, not the drive's top level — which is
+        // what used to be returned, pointing a subfolder library at the whole drive.
+        const candidate = mount ? join(mount, root.volumePath ?? '') : null;
+        if (candidate && candidate !== root.path) {
+          const there = await withTimeout(this.identify(root, candidate), this.probeTimeoutMs, root.label);
+          if (there === 'ours') return state('relocated', candidate);
         }
       } catch {
         /* relocation failed too */
       }
     }
 
-    return {
-      root,
-      status: 'offline',
-      probeMs: Date.now() - started,
-      error: 'not reachable',
-    };
+    return state('offline');
+  }
+
+  /**
+   * Is the library at `base` right now?
+   *
+   * Strongest proof first: the volume UUID — a drive is itself, whatever is on it. Then
+   * the sentinel. Then a folder that still holds something. That last rule is the fix
+   * for a real report: the sentinel is ONE entry picked at pairing, and moving it into a
+   * subfolder while reorganising a drive made a plugged-in drive read "Not connected".
+   * Reorganising changes what is on a drive, not whether it is there.
+   */
+  private async identify(root: LibraryRoot, base: string): Promise<'ours' | 'other' | 'absent'> {
+    const s = await stat(base).catch(() => null);
+    if (!s?.isDirectory()) return 'absent';
+
+    if (root.volumeUUID) {
+      const info = await this.inspect(base);
+      if (info.volumeUUID) return info.volumeUUID === root.volumeUUID ? 'ours' : 'other';
+      // The filesystem would not say (some never do): judge by what is there instead.
+    }
+
+    // A mount point left behind — a folder under /Volumes that sits on the startup disk
+    // itself — is not the drive, whatever it holds.
+    if (base.startsWith('/Volumes/')) {
+      const system = await stat('/').catch(() => null);
+      if (system && system.dev === s.dev) return 'absent';
+    }
+
+    if (root.sentinel && (await exists(join(base, root.sentinel)))) return 'ours';
+    const entries = await readdir(base).catch(() => [] as string[]);
+    return entries.some((name) => !name.startsWith('.')) ? 'ours' : 'absent';
   }
 
   /** Probe every root in parallel — one sleeping NAS must not delay the others. */
   async probeAll(): Promise<VolumeState[]> {
     await this.load();
-    return Promise.all(this.roots.map((r) => this.probe(r)));
+    const states = await Promise.all(this.roots.map((r) => this.probe(r)));
+    // Never fails a probe: a record that cannot be improved now is improved next time.
+    await this.repair(states).catch(() => {});
+    return states;
+  }
+
+  /**
+   * Complete what an older pairing never recorded, once the library is in reach.
+   *
+   * Every library that is a folder rather than a whole drive was paired without a
+   * volume UUID (diskutil was asked about the folder, and answers only for a volume),
+   * so it could not be found under a new mount name, and one sentinel was the only
+   * proof it was there. A sentinel that has moved is replaced, so it means something
+   * again. The id is never touched: every sighting of every file refers to it.
+   */
+  private async repair(states: VolumeState[]): Promise<void> {
+    let changed = false;
+    for (const s of states) {
+      if (s.status === 'offline' || !s.resolvedPath) continue;
+      const root = s.root;
+      if (!root.volumeUUID) {
+        const info = await withTimeout(this.inspect(s.resolvedPath), this.probeTimeoutMs, root.label).catch(
+          () => null,
+        );
+        if (info?.volumeUUID) {
+          root.volumeUUID = info.volumeUUID;
+          root.fileSystem ??= info.fileSystem;
+          root.volumePath = volumePathOf(s.resolvedPath, info.mountPoint);
+          changed = true;
+        }
+      }
+      if (!root.sentinel || !(await exists(join(s.resolvedPath, root.sentinel)))) {
+        const fresh = await pickSentinel(s.resolvedPath);
+        if (fresh && fresh !== root.sentinel) {
+          root.sentinel = fresh;
+          changed = true;
+        }
+      }
+    }
+    if (changed) await this.persist();
   }
 
   /** Persist a relocation so the next launch tries the right path first. */

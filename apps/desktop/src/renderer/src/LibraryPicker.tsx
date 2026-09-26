@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ShelfFace } from './ShelfFace';
 import { Wordmark } from './Wordmark';
+import { errorMessage } from './ipc-error';
 import { ALL_LIBRARIES } from '../../shared/types';
 import type {
   LibraryApi,
@@ -164,7 +165,7 @@ export function LibraryPicker({
       setNeedsToken(e.skipped === 'no-token');
       await refresh();
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : String(err));
+      setScanError(errorMessage(err));
     } finally {
       setScanning(null);
     }
@@ -184,6 +185,26 @@ export function LibraryPicker({
     await window.libraries.remove(id);
     await refresh();
   };
+
+  /*
+   * A drive reorganised since its last scan — films moved into new folders — is rescanned
+   * here, without being asked. The files are found again by their content, so nothing
+   * about them is lost, and until they are, Play would have to go looking for each one.
+   *
+   * Once per drive per launch: a file that was DELETED stays missing after the rescan,
+   * and a flag that never clears must not become a scan on every refresh. The rescan's
+   * own result says what moved, and lists anything no longer on the drive.
+   */
+  const autoScanned = useRef(new Set<string>());
+  useEffect(() => {
+    if (!cards || scanning) return;
+    const due = cards.find(
+      (c) => !c.combined && c.connected && c.filesMoved && !autoScanned.current.has(c.id),
+    );
+    if (!due) return;
+    autoScanned.current.add(due.id);
+    void scan(due);
+  }, [cards, scanning]);
 
   if (cards === null) {
     return (

@@ -12,7 +12,7 @@ import type { MediaFile, Title } from '../schema/index.js';
 import type { VolumeState } from '../volumes/manager.js';
 
 export type Availability =
-  | { status: 'available'; media: MediaFile; absolutePath: string; volumeLabel: string }
+  | { status: 'available'; media: MediaFile; absolutePath: string; volumeId: string; volumeLabel: string }
   | { status: 'offline'; media: MediaFile; volumeLabel: string }
   | { status: 'missing' };
 
@@ -104,6 +104,7 @@ export class MediaResolver {
         status: 'available',
         media,
         absolutePath: join(vol.path, sighting.relPath),
+        volumeId: sighting.volumeId,
         volumeLabel: vol.label,
       };
     }

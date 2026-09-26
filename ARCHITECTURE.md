@@ -2,7 +2,7 @@
 
 **Status:** Locked
 **Target:** macOS 14+, Apple Silicon (any generation), single user, offline-capable
-**Last updated:** 2026-09-24 (year-numbered series, series described from films, watched rule, season shelves — §5.1, §5.4, §7.3, §7.4, §8.3)
+**Last updated:** 2026-09-26 (a reorganised drive stays connected and rescans itself — §6)
 
 This document is the source of truth for architectural decisions. It is written to be read
 by both humans and coding agents. If an implementation disagrees with this document, the
@@ -360,9 +360,10 @@ type LibraryRoot = {
   id: string;
   label: string;                            // "Plex SSD"
   kind: 'local' | 'removable' | 'smb' | 'nfs';
-  path: string;                             // last known mount point
-  volumeUUID?: string;                      // diskutil info -plist
-  sentinel: string;                         // rel path proving the mount is real
+  path: string;                             // last known path of the library folder
+  volumeUUID?: string;                      // of the VOLUME the folder is on (df -P → diskutil)
+  volumePath?: string;                      // the folder inside that volume; '' = whole drive
+  sentinel: string;                         // a hint only — see below
   remote?: { host: string; share: string; credentialRef: string };
 };
 ```
@@ -370,9 +371,18 @@ type LibraryRoot = {
 **Boot sequence:**
 1. Probe each root with a **2-second timeout** wrapper. An unreachable SMB mount will
    block a naive `fs.access` for 30+ seconds. This timeout is not optional.
-2. If the path moved, resolve by `volumeUUID` before declaring the root missing.
-3. Render Home immediately from the cached index. Rescan in the background.
-4. Missing roots produce a "Reconnect" screen naming the specific drive, with
+   "Connected" is decided by identity, strongest proof first: the volume UUID, then
+   the sentinel, then a folder that still holds anything. The sentinel used to be the
+   only proof, so moving that one entry into a subfolder made a plugged-in drive read
+   "Not connected".
+2. If the path moved, resolve by `volumeUUID` to `join(mount, volumePath)` (the library
+   folder, not the drive's top level) before declaring the root missing. A library in
+   reach that lacks its UUID, `volumePath` or a present sentinel has them filled in, and
+   its id is kept.
+3. If any recorded file path on a connected drive is gone, rescan that drive once
+   (it finds moved files by content). Play does the same for the one file it needs.
+4. Render Home immediately from the cached index. Rescan in the background.
+5. Missing roots produce a "Reconnect" screen naming the specific drive, with
    Retry / Locate / Continue offline. Offline continues to Home with tiles disabled.
 
 **Live detection:** watch `/Volumes` with chokidar. Mount and unmount events fire

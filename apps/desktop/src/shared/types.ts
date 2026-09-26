@@ -32,6 +32,12 @@ export type LibraryCard = {
   totalBytes: number;
   needsMetadata: number;
   availableCount: number;
+  /**
+   * Connected, but some file is no longer where the last scan saw it — the drive has
+   * been reorganised. The picker rescans such a drive by itself, once per launch;
+   * identity is content, so the moved files are found and nothing about them is lost.
+   */
+  filesMoved?: boolean;
 };
 
 /**

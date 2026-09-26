@@ -13,6 +13,7 @@ import type {
 import { Wordmark } from './Wordmark';
 import { HeroTrailer } from './HeroTrailer';
 import { HERO_DISSOLVE_MS, buildHeroQueue, nextHeroIndex } from './hero-trailer';
+import { errorMessage } from './ipc-error';
 import {
   DEFAULT_SORT,
   NO_FILTERS,
@@ -1132,7 +1133,7 @@ export function Browse({
     } catch (err) {
       // Without rendering this, a failed Play does nothing visible at all — the most
       // confusing possible outcome.
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error('play failed:', message);
       setPlayError(message);
       // Nothing is playing, so there is nothing for the trailer to talk over.

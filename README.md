@@ -258,6 +258,14 @@ a friend's drive can be catalogued **without writing a byte to it**, a film copi
 your own disk is recognised on sight with its artwork intact, the same film on two
 drives is one title rather than a duplicate, and renames cost nothing.
 
+It also means reorganising a drive loses nothing. Move the Cars films into a
+`CARS Collection` folder and, the next time the drive is connected, the app notices
+the old paths are gone and rescans that drive by itself, finding each film by its
+content with its artwork, match and watch history intact. Press Play on a film moved
+while the app was open and it does the same for that one file. A drive is recognised by
+its volume UUID, not by any one file on it, so tidying it never makes it read
+"Not connected".
+
 ### Report what happened, not what was configured
 
 A Dolby Vision remux was being flattened to SDR for weeks. The config said HDR was

@@ -95,7 +95,7 @@ guess.
   Jerry shorts) are described episode by episode. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 489 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 510 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -1008,6 +1008,58 @@ Three cases, handled differently on purpose:
 
 Watch history lives in `state/` and survives pruning, so re-adding a film restores its
 resume point.
+
+## A reorganised drive is still the same drive
+
+Reported with a screenshot: an SSD plugged in, visible in Finder, and its library card
+reading "Not connected". The owner had tidied it, moving films into "Back to the Future
+Trilogy", "CARS Collection", "Batman Trilogy" and so on, and one of the files moved was
+the SENTINEL. That one entry, picked at pairing, was the only proof `probe` accepted.
+The drive's UUID, which should have been the real proof, had never been recorded:
+`inspectVolume` asked `diskutil` about the library FOLDER, and diskutil answers only
+for a mount point or a device. Every library that is a folder inside a drive was
+therefore paired with no UUID at all.
+
+Four layers, each for a case the one before cannot see:
+
+1. **Connected is decided by identity** (`identify` in `volumes/manager.ts`). The volume
+   UUID comes first: a drive is itself whatever is on it, and a DIFFERENT drive at the
+   same path is not ours. Then the sentinel. Then a folder that still holds anything.
+   A mount-point folder left behind under `/Volumes`, sitting on the startup disk
+   (same `st_dev` as `/`), is never taken for the drive. `mountPointOf` uses `df -P` to
+   find the volume a folder lives on, so diskutil is asked about the right thing.
+2. **Old pairings are completed** (`repair`, run after every `probeAll`). Once a
+   library is in reach it gains its UUID, its `volumePath` inside the drive
+   (`'MOVIEX'`, or `''` for a whole drive) and a fresh sentinel if the old one moved.
+   **The id is never touched**, because every sighting of every file refers to it.
+   `pair()` of an already-paired folder reuses its id for the same reason. Relocation by
+   UUID resolves to `join(mount, volumePath)`. It used to return the drive's top level,
+   which would point a folder library at the whole drive.
+3. **Moved files trigger a rescan on connect.** `hasMovedFiles` (`library/moved.ts`)
+   checks this drive's recorded paths, stops at the first miss, and gives up after
+   1.5s so a sleeping NAS cannot hold up the picker. The card carries `filesMoved`, and
+   the picker rescans that library by itself ONCE PER LAUNCH. Once, because a genuinely
+   deleted file stays missing after a rescan, and "until nothing is missing" would
+   loop forever. The rescan finds moved files by content, so matches, artwork,
+   confirmed status and watch history all carry over. Verified on the real drive:
+   "2 new · 9 moved · 127 unchanged" in 2.2s, 138 of 138 files resolving, and every
+   record identical apart from `relPath`/`lastSeen`/`updatedAt`.
+4. **Play heals itself** (`decide` in `library-ipc.ts`). A drive reorganised WHILE the
+   app shows it is invisible to layer 3, so a file that is not where the record says
+   triggers one rescan of that drive, and the decision is made again. Only if the file
+   is still missing does Play fail, and then it says so in words: "X is no longer on
+   MOVIEX — it may have been deleted, or moved off the drive."
+
+`scanVolume` runs one scan per drive at a time (`main/scan-queue.ts`), so the automatic
+rescan, a Play self-heal and a Rescan click that land together share one scan rather
+than racing to write the same records. A PRUNE never joins a scan that does not prune,
+because the removal that was asked for would be silently dropped. It waits and runs
+after.
+
+Errors thrown in an `ipcMain.handle` reach the renderer wrapped as "Error invoking
+remote method 'library:play': Error: …". `errorMessage` (`renderer/src/ipc-error.ts`)
+strips that, so a toast leads with the sentence the main process wrote. Every Play
+failure toast had been carrying the wrapper.
 
 ## Playback: mpv owns its own window
 

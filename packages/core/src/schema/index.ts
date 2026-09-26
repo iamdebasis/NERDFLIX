@@ -306,7 +306,16 @@ export const LibraryRootSchema = z.object({
   /** Survives remounts under a different name. The reason this works at all. */
   volumeUUID: z.string().optional(),
   fileSystem: z.string().optional(),
-  /** Relative path proving the mount is really ours and not an empty mountpoint. */
+  /**
+   * Where the library folder sits INSIDE its volume ('MOVIEX', or '' for the drive
+   * itself). With the UUID it finds the folder again when the drive mounts under
+   * another name — the UUID alone only finds the drive.
+   */
+  volumePath: z.string().optional(),
+  /**
+   * One entry of the folder, recorded at pairing — a hint that it is really there. Only
+   * a hint: reorganising a drive moves it, which is why presence no longer rests on it.
+   */
   sentinel: z.string().optional(),
   /**
    * Someone else's drive, catalogued but not owned. Kept visible so its titles can be

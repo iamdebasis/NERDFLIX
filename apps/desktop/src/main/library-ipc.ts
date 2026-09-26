@@ -19,6 +19,7 @@
  */
 
 import { ipcMain } from 'electron';
+import { access } from 'node:fs/promises';
 import {
   episodeLabel,
   MediaResolver,
@@ -26,6 +27,7 @@ import {
   StateStore,
   watchedFromSec,
   type MediaFile,
+  type Title,
   type VolumeState,
 } from '@nfl/core';
 import {
@@ -124,7 +126,14 @@ type Deps = {
   state: StateStore;
   getStates: () => VolumeState[];
   onClosed?: () => void;
+  /** Rescan one drive — what Play does when a file has moved on a connected drive. */
+  rescan?: (volumeId: string) => Promise<void>;
 };
+
+const fileExists = (path: string) => access(path).then(
+  () => true,
+  () => false,
+);
 
 export function registerPlaybackIpc(deps: Deps): void {
   /**
@@ -194,39 +203,45 @@ export function registerPlaybackIpc(deps: Deps): void {
        * record progress — once, before either engine is involved. Both engine paths
        * below then treat a film and an episode identically.
        */
-      const resolver = new MediaResolver(deps.getStates());
-      let target: {
+      type Target = {
         absolutePath: string;
         media: MediaFile;
         startAt?: number;
         displayTitle: string;
         record: (pos: number) => void;
+        /** Which drive the file is on — the one to look through if it has moved. */
+        volumeId: string;
+        volumeLabel: string;
       };
 
-      if (title.type === 'show') {
-        const pick = episodeToPlay(title, await showContext(id), opts.episodeKey);
-        if (!pick) throw new Error('No playable episode');
-        // Only this episode's own copies — never a different episode that is plugged in.
-        const a = resolver.resolveAmong(pick.slot.files);
-        if (a.status !== 'available') {
-          throw new Error(
-            a.status === 'offline' ? `${a.volumeLabel} isn't connected` : 'Episode not found',
-          );
+      const decide = async (t: Title): Promise<Target> => {
+        const resolver = new MediaResolver(deps.getStates());
+        if (t.type === 'show') {
+          const pick = episodeToPlay(t, await showContext(id), opts.episodeKey);
+          if (!pick) throw new Error('No playable episode');
+          // Only this episode's own copies — never a different episode that is plugged in.
+          const a = resolver.resolveAmong(pick.slot.files);
+          if (a.status !== 'available') {
+            throw new Error(
+              a.status === 'offline' ? `${a.volumeLabel} isn't connected` : 'Episode not found',
+            );
+          }
+          const name = pick.slot.info?.name ?? a.media.episodeTitle;
+          const contentId = a.media.contentId;
+          const duration = a.media.durationSec;
+          const finishedFrom = watchedFromSec(duration, a.media.chapters);
+          return {
+            absolutePath: a.absolutePath,
+            media: a.media,
+            startAt: fromStart ? undefined : pick.resumeSec,
+            // "Breaking Bad — S1:E4 · Cancer Man", in the OSC and the window title.
+            displayTitle: `${t.title} — ${episodeLabel(pick.slot)}${name ? ` · ${name}` : ''}`,
+            record: (pos) => void deps.state.setEpisodeProgress(id, contentId, pos, duration, finishedFrom),
+            volumeId: a.volumeId,
+            volumeLabel: a.volumeLabel,
+          };
         }
-        const name = pick.slot.info?.name ?? a.media.episodeTitle;
-        const contentId = a.media.contentId;
-        const duration = a.media.durationSec;
-        const finishedFrom = watchedFromSec(duration, a.media.chapters);
-        target = {
-          absolutePath: a.absolutePath,
-          media: a.media,
-          startAt: fromStart ? undefined : pick.resumeSec,
-          // "Breaking Bad — S1:E4 · Cancer Man", in the OSC and the window title.
-          displayTitle: `${title.title} — ${episodeLabel(pick.slot)}${name ? ` · ${name}` : ''}`,
-          record: (pos) => void deps.state.setEpisodeProgress(id, contentId, pos, duration, finishedFrom),
-        };
-      } else {
-        const availability = resolver.resolve(title, versionIndex);
+        const availability = resolver.resolve(t, versionIndex);
         if (availability.status !== 'available') {
           throw new Error(
             availability.status === 'offline'
@@ -237,13 +252,35 @@ export function registerPlaybackIpc(deps: Deps): void {
         const progress = fromStart ? null : await deps.state.getProgress(id);
         const duration = availability.media.durationSec;
         const finishedFrom = watchedFromSec(duration, availability.media.chapters);
-        target = {
+        return {
           absolutePath: availability.absolutePath,
           media: availability.media,
           startAt: progress?.positionSec,
-          displayTitle: `${title.title}${title.year ? ` (${title.year})` : ''}`,
+          displayTitle: `${t.title}${t.year ? ` (${t.year})` : ''}`,
           record: (pos) => void deps.state.setProgress(id, pos, duration, versionIndex, finishedFrom),
+          volumeId: availability.volumeId,
+          volumeLabel: availability.volumeLabel,
         };
+      };
+
+      let target = await decide(title);
+
+      /*
+       * The drive is connected but the file is not where it was last seen: the drive has
+       * been reorganised — "a Cars folder, with the Cars films moved into it". Look for
+       * it rather than failing with "File not found": rescan that drive (identity is the
+       * file's CONTENT, so a moved file is recognised and its path updated), then decide
+       * again. Only a file that is genuinely gone is reported as gone — and said plainly.
+       */
+      if (!(await fileExists(target.absolutePath)) && deps.rescan) {
+        await deps.rescan(target.volumeId);
+        const found = await deps.store.get(id);
+        if (found) target = await decide(found);
+        if (!(await fileExists(target.absolutePath))) {
+          throw new Error(
+            `${title.title} is no longer on ${target.volumeLabel} — it may have been deleted, or moved off the drive.`,
+          );
+        }
       }
 
       const displayTitle = target.displayTitle;

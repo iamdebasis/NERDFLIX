@@ -21,11 +21,13 @@ import {
   needsEnrichment,
   loadEnvFiles,
   TmdbClient,
+  hasMovedFiles,
   type VolumeState,
 } from '@nfl/core';
-import { ALL_LIBRARIES, type LibraryCard } from '../shared/types.js';
+import { ALL_LIBRARIES, type LibraryCard, type ScanResult } from '../shared/types.js';
 import { buildBrowseData, registerMediaProtocol, registerMediaScheme } from './browse.js';
 import { disposePlayback, registerPlaybackIpc } from './library-ipc.js';
+import { scanQueue } from './scan-queue.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // out/main → repo root
@@ -45,6 +47,54 @@ let lastStates: VolumeState[] = [];
 let mainWindow: BrowserWindow | null = null;
 
 /**
+ * Scan one drive and fold what it holds into the library. Everything that scans goes
+ * through here, one scan per drive at a time — see scan-queue.ts.
+ */
+const scanVolume = scanQueue(runScan);
+
+async function runScan(volumeId: string, prune: boolean): Promise<ScanResult> {
+  let state = lastStates.find((s) => s.root.id === volumeId);
+  if (!state || state.status === 'offline' || !state.resolvedPath) {
+    // Plugged in since the picker last looked? Ask again before giving up.
+    lastStates = await vm.probeAll();
+    state = lastStates.find((s) => s.root.id === volumeId);
+  }
+  if (!state || state.status === 'offline' || !state.resolvedPath) {
+    throw new Error('That drive is not connected');
+  }
+
+  const send = (payload: unknown) => mainWindow?.webContents.send('libraries:scanProgress', payload);
+
+  const report = await scanRoot(state.resolvedPath, {
+    concurrency: 4,
+    // The 200 MB feature floor is right for films but wrong for a library of
+    // short clips, and impossible to test against without an override.
+    minFeatureBytes: process.env.NFL_MIN_SIZE ? Number(process.env.NFL_MIN_SIZE) : undefined,
+    onProgress: (done, total, current) => send({ volumeId, done, total, current, phase: 'scanning' }),
+  });
+
+  send({ volumeId, done: report.titles.length, total: report.titles.length, current: '', phase: 'saving' });
+
+  const stats = await ingest(report, state.root, state.resolvedPath, store, { prune });
+
+  send({ volumeId, done: 0, total: 0, current: '', phase: 'done' });
+  mainWindow?.webContents.send('libraries:changed');
+
+  return {
+    created: stats.created,
+    updated: stats.updated,
+    unchanged: stats.unchanged,
+    moved: stats.relocated,
+    alreadyKnown: stats.alreadyKnown,
+    episodesAdded: stats.episodesAdded,
+    reclassified: stats.reclassified,
+    missing: stats.missing.map((m) => ({ title: m.title, relPath: m.relPath })),
+    pruned: stats.pruned,
+    elapsedMs: report.elapsedMs,
+  };
+}
+
+/**
  * Build the picker cards.
  *
  * Title counts come from the DB, which knows what exists regardless of what is
@@ -57,6 +107,22 @@ async function buildCards(): Promise<LibraryCard[]> {
 
   const { titles } = await store.loadAll();
   const resolver = new MediaResolver(states);
+
+  // Reorganised since the last scan? Only asked where the drive is in reach, and only
+  // until the first file is found missing — the picker rescans such a drive itself.
+  const moved = new Map(
+    await Promise.all(
+      states.map(
+        async (s) =>
+          [
+            s.root.id,
+            s.status !== 'offline' && s.resolvedPath
+              ? await hasMovedFiles(titles, s.root.id, s.resolvedPath).catch(() => false)
+              : false,
+          ] as const,
+      ),
+    ),
+  );
 
   const cards: LibraryCard[] = states.map((s) => {
     // A title belongs to this volume if ANY of its files have been seen there.
@@ -92,6 +158,7 @@ async function buildCards(): Promise<LibraryCard[]> {
       needsMetadata,
       neverScanned: owned.length === 0,
       availableCount: owned.filter((t) => resolver.resolve(t).status === 'available').length,
+      filesMoved: moved.get(s.root.id) ?? false,
     } satisfies LibraryCard;
   });
 
@@ -282,44 +349,7 @@ function registerIpc(): void {
    * disagrees with the disk is worse than one that is obviously empty, so this has to
    * be reachable from the card itself.
    */
-  ipcMain.handle('libraries:scan', async (_e, volumeId: string, prune = false) => {
-    const state = lastStates.find((s) => s.root.id === volumeId);
-    if (!state || state.status === 'offline' || !state.resolvedPath) {
-      throw new Error('That drive is not connected');
-    }
-
-    const send = (payload: unknown) =>
-      mainWindow?.webContents.send('libraries:scanProgress', payload);
-
-    const report = await scanRoot(state.resolvedPath, {
-      concurrency: 4,
-      // The 200 MB feature floor is right for films but wrong for a library of
-      // short clips, and impossible to test against without an override.
-      minFeatureBytes: process.env.NFL_MIN_SIZE ? Number(process.env.NFL_MIN_SIZE) : undefined,
-      onProgress: (done, total, current) =>
-        send({ volumeId, done, total, current, phase: 'scanning' }),
-    });
-
-    send({ volumeId, done: report.titles.length, total: report.titles.length, current: '', phase: 'saving' });
-
-    const stats = await ingest(report, state.root, state.resolvedPath, store, { prune });
-
-    send({ volumeId, done: 0, total: 0, current: '', phase: 'done' });
-    mainWindow?.webContents.send('libraries:changed');
-
-    return {
-      created: stats.created,
-      updated: stats.updated,
-      unchanged: stats.unchanged,
-      moved: stats.relocated,
-      alreadyKnown: stats.alreadyKnown,
-      episodesAdded: stats.episodesAdded,
-      reclassified: stats.reclassified,
-      missing: stats.missing.map((m) => ({ title: m.title, relPath: m.relPath })),
-      pruned: stats.pruned,
-      elapsedMs: report.elapsedMs,
-    };
-  });
+  ipcMain.handle('libraries:scan', (_e, volumeId: string, prune = false) => scanVolume(volumeId, prune));
 
   ipcMain.handle('library:browse', async (_e, volumeId?: string) => {
     const states = await vm.probeAll();
@@ -400,6 +430,10 @@ void app.whenReady().then(async () => {
     getStates: () => lastStates,
     // Quitting mpv should show fresh progress on the tiles.
     onClosed: () => mainWindow?.webContents.send('libraries:changed'),
+    // A film moved on a connected drive is looked for, not reported missing.
+    rescan: async (volumeId) => {
+      await scanVolume(volumeId);
+    },
   });
 
   // Warm the volume + artwork index before the first paint, so posters resolve on
