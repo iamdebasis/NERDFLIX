@@ -6,7 +6,7 @@
 
 Browse your library like a streaming service. Play it like an audiophile.
 
-`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `489 tests`
+`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `525 tests`
 
 </div>
 
@@ -50,7 +50,8 @@ re-encoded, and nothing is ever written to your drives.**
 - **Searches** across title, year, genre, director, creator and cast.
 - **Picks the audio and subtitle track before the film starts**, with commentaries
   labelled, so a disc with four audio mixes and forty-seven subtitle tracks opens on the
-  one you wanted. The choice is remembered per film or show.
+  one you wanted. Left on *Automatic*, it plays the best soundtrack and never a
+  commentary. A choice is remembered per film or show.
 - **Plays through mpv or IINA** with HDR passthrough, hardware decode and quality that
   adapts to your machine in both directions — then reports what actually happened rather
   than what was requested.
@@ -179,8 +180,9 @@ posters.
 
 ### 4. Add a library
 
-Everything from here is a button. **Add library** in the picker, choose the folder your
-films are in, and the scan runs straight into fetching metadata and artwork. Nested
+Everything from here is a button. Press **Choose a folder** (later, **Add a folder**),
+pick the folder your films are in, and the scan runs straight into fetching metadata and
+artwork. Nested
 folders are walked to any depth, so pointing it at a drive root is fine.
 
 TV shows live in the same library as films. Any of the usual layouts is recognised:
@@ -203,15 +205,15 @@ for debugging and nothing requires it.
 Skip this if you are using mpv.
 
 `iina-cli` deliberately ignores `--input-*` flags, so the IPC socket cannot be passed per
-launch. Open **IINA → Settings → Advanced**, tick *Enable advanced settings*, and add to
-*Additional mpv options*:
+launch. Open **IINA → Settings → Advanced** and tick *Enable advanced settings*. Under
+*Additional mpv options*, press **+** and add one entry:
 
-```
-input-ipc-server=/tmp/nerdflix-iina.sock
-```
+| option | value |
+|---|---|
+| `input-ipc-server` | `/tmp/nerdflix-iina.sock` |
 
 Then quit IINA. Without it, films still play but watch progress cannot be tracked — so
-the app refuses to start that engine and tells you exactly what to paste, rather than
+the app refuses to start that engine and tells you exactly what to add, rather than
 silently losing your resume points.
 
 ### Where your library lives
@@ -478,7 +480,7 @@ pnpm scan <path>          # scan a library root and print a report
 pnpm enrich               # TMDB metadata and artwork
 pnpm library [--review]   # list titles, availability, match warnings
 pnpm play <file>          # play with a terminal scrubber and live diagnostics
-pnpm test                 # 489 tests
+pnpm test                 # 525 tests
 pnpm typecheck
 ```
 
@@ -492,7 +494,7 @@ pnpm screenshots          # terminal 2 — writes docs/screenshots/
 
 ## Testing
 
-**489 tests**, run against real files and real behaviour rather than mocks — several
+**525 tests**, run against real files and real behaviour rather than mocks — several
 bugs here were only reproducible with genuine 4K HEVC and actual drive behaviour.
 
 The discovery tests build real directory trees in a temp dir and scan them, including

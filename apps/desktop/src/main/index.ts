@@ -1,5 +1,7 @@
 // FIRST, always: it decides where data lives before anything reads that. See data-dir.ts.
 import './data-dir.js';
+// Before anything runs ffprobe or mpv: Finder's PATH has no Homebrew. See tool-path.ts.
+import './tool-path.js';
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { watch } from 'node:fs';

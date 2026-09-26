@@ -113,7 +113,8 @@ function mpvAvailable(): boolean {
 describe('ExternalMpvEngine (live)', { skip: !mpvAvailable() && 'mpv not installed' }, () => {
   test('reports a clear error when the binary is missing', async () => {
     const e = new ExternalMpvEngine({ mpvPath: '/nonexistent/mpv', headless: true });
-    await assert.rejects(() => e.start(), /failed to spawn mpv/);
+    // Says what to do about it, not "spawn mpv ENOENT".
+    await assert.rejects(() => e.start(), /mpv was not found\. Install it with: brew install mpv/);
     await e.dispose();
   });
 
@@ -684,7 +685,10 @@ describe('IINA engine selection', () => {
     const { IinaNotConfiguredError } = await import('./iina.js');
     const msg = new IinaNotConfiguredError('/tmp/x.sock').message;
     assert.match(msg, /Additional mpv options/);
-    assert.match(msg, /input-ipc-server=\/tmp\/x\.sock/);
+    // IINA's extra options are option/value PAIRS, so the two are given separately —
+    // "input-ipc-server=/tmp/x.sock" typed into the option column would do nothing.
+    assert.match(msg, /option\s+input-ipc-server\n/);
+    assert.match(msg, /value\s+\/tmp\/x\.sock/);
   });
 });
 

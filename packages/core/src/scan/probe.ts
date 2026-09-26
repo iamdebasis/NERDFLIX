@@ -113,6 +113,20 @@ function bitDepthOf(stream: any): number | undefined {
   return fmt.includes('p10') ? 10 : undefined;
 }
 
+/**
+ * ffprobe is not installed, or not on PATH — so NO file can be read.
+ *
+ * Distinct from a file ffprobe cannot read, which is one file's problem and is recorded
+ * against it. This one is every file's problem, and recording it per file made a scan
+ * of a full folder report "Up to date" with nothing found. The scan stops and says why.
+ */
+export class FfprobeMissingError extends Error {
+  constructor() {
+    super('ffprobe was not found, so no file can be read. Install it with: brew install ffmpeg — then scan again.');
+    this.name = 'FfprobeMissingError';
+  }
+}
+
 export async function probe(path: string, sizeBytes: number): Promise<ProbeResult> {
   const { stdout } = await exec(
     'ffprobe',
@@ -125,7 +139,9 @@ export async function probe(path: string, sizeBytes: number): Promise<ProbeResul
       path,
     ],
     { maxBuffer: 32 * 1024 * 1024 },
-  );
+  ).catch((err: NodeJS.ErrnoException) => {
+    throw err.code === 'ENOENT' ? new FfprobeMissingError() : err;
+  });
 
   const data = JSON.parse(stdout);
   const streams: any[] = data.streams ?? [];

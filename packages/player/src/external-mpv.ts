@@ -229,8 +229,14 @@ export class ExternalMpvEngine implements PlaybackEngine {
     });
 
     const spawnFailure = new Promise<never>((_, reject) => {
-      this.process!.once('error', (err) =>
-        reject(new MpvIpcError(`failed to spawn mpv (${this.mpvPath}): ${err.message}`)),
+      this.process!.once('error', (err: NodeJS.ErrnoException) =>
+        reject(
+          new MpvIpcError(
+            err.code === 'ENOENT'
+              ? 'mpv was not found. Install it with: brew install mpv — or install IINA, which Nerdflix uses when present.'
+              : `failed to spawn mpv (${this.mpvPath}): ${err.message}`,
+          ),
+        ),
       );
       this.process!.once('exit', (code) =>
         reject(

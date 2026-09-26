@@ -71,8 +71,8 @@ const checks: Check[] = [
        */
       const { DEFAULT_IINA_SOCKET } = await import('@nfl/player');
       return (
-        `${cli}\n     set "input-ipc-server=${DEFAULT_IINA_SOCKET}" in ` +
-        `IINA → Settings → Advanced → Additional mpv options`
+        `${cli}\n     in IINA → Settings → Advanced → Additional mpv options, add the option ` +
+        `input-ipc-server with the value ${DEFAULT_IINA_SOCKET}`
       );
     },
   },

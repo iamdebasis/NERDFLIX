@@ -40,19 +40,25 @@ A local Netflix-style front end for a personal library of high-bitrate video fil
 ## Layout
 
 ```
-packages/core/   scanner, schema, volumes, metastore   (@nfl/core)
-packages/cli/    scan, probe, doctor, add-title        (@nfl/cli)
-apps/desktop/    Electron main + preload               (not built yet)
-apps/ui/         React renderer                        (not built yet)
-db/              title JSON — source of truth, agent-writable
-state/           user state — app-owned, never regenerate
-cache/           artwork, trailers, raw TMDB responses — disposable
+packages/core/     scanner, schema, volumes, metastore, TMDB enrichment   (@nfl/core)
+packages/player/   mpv + IINA engines, JSON IPC, quality tiers           (@nfl/player)
+packages/cli/      scan, play, enrich, library, volumes, doctor          (@nfl/cli)
+apps/desktop/      Electron app: src/main, src/preload, src/renderer (React)
+data/db/           title JSON — derived, rebuildable by rescanning
+data/state/        user state — app-owned, never regenerate
+data/cache/        artwork, raw TMDB responses, capabilities — disposable
 ```
+
+In a packaged app `data/` is `~/Library/Application Support/Nerdflix/data` instead
+(see §"Packaging").
 
 ## Commands
 
 ```bash
-pnpm doctor                    # verify ffprobe / mpv / yt-dlp
+pnpm app                       # the app, from source
+pnpm run doctor                # verify ffprobe / mpv / IINA / Electron ('run' is required:
+                               # bare `pnpm doctor` is pnpm's own command)
+pnpm dist                      # unsigned .dmg into apps/desktop/release/
 pnpm scan <path>               # scan a library root, print a report
 pnpm scan <path> --fast        # skip ffprobe, structural pass only
 pnpm scan <path> --json        # machine-readable output
@@ -95,7 +101,7 @@ guess.
   Jerry shorts) are described episode by episode. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 519 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 525 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -1257,11 +1263,11 @@ when tier costs do — a ceiling recorded under different rules is worse than no
 
 ## Capability cache
 
-`observedCeiling` in `~/.cache/netflix-local/capabilities.json` records the highest
-tier a machine sustained — but only for the tier definitions in force at the time.
-Bump `QUALITY_MODEL_VERSION` in `capabilities.ts` whenever tier costs change, or a
-machine demoted under old definitions stays capped forever with no visible reason.
-`pnpm doctor` prints the current ceiling and how to clear it.
+`data/cache/capabilities.json` (via `cache-dir.ts`) caches what the hardware probe found —
+chip, GPU cores, memory, the suggested opening tier — keyed by chip, because
+`system_profiler` is slow. It no longer records a quality ceiling: see §"The watchdog
+climbs back". An `observedCeiling` left by an older build is dropped when
+`QUALITY_MODEL_VERSION` changes, and `pnpm run doctor` reports one if it is still there.
 
 ## Identity comes from content, not location
 
@@ -1381,6 +1387,17 @@ Four things that each broke the build or the built app:
 - **`pnpm.ignoredBuiltDependencies: [electron-winstaller]`.** A Windows-only transitive
   dep whose blocked build script fails the entire install. We only ever target macOS.
 - **The packaged app needs `data-dir.ts`, imported FIRST in main.** See below.
+- **The packaged app needs `tool-path.ts` too.** ffprobe and mpv are run by name, and
+  an app opened from Finder gets launchd's PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), with
+  no Homebrew. Measured on the 1.0.0 build launched that way: scanning a folder that held
+  a film reported "Up to date", nothing found, nothing said. From a terminal the same
+  build worked, so running from source never showed it. `tool-path.ts` appends the
+  Homebrew and MacPorts folders that exist. A genuinely missing ffprobe now STOPS the scan
+  with "Install it with: brew install ffmpeg" (`FfprobeMissingError`), because it is
+  every file's problem, not one file's. A missing mpv says "brew install mpv — or
+  install IINA". Test the DMG the way a user opens it:
+  `open -n -a apps/desktop/release/mac-arm64/Nerdflix.app`, or run its binary under
+  `env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin`, never only from a terminal.
 
 **Where a packaged build keeps data — and why `app.setName` is load-bearing.**
 `findProjectRoot` looks upward for `pnpm-workspace.yaml`; inside a `.app` there is none,

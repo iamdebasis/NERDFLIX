@@ -2,7 +2,7 @@
 
 **Status:** Locked
 **Target:** macOS 14+, Apple Silicon (any generation), single user, offline-capable
-**Last updated:** 2026-09-26 (a reorganised drive stays connected and rescans itself — §6)
+**Last updated:** 2026-09-26 (layout, HDR default and capability cache brought in line with the code — §2, §2.1, §3; a reorganised drive — §6)
 
 This document is the source of truth for architectural decisions. It is written to be read
 by both humans and coding agents. If an implementation disagrees with this document, the
@@ -84,8 +84,12 @@ Resolve this at runtime, never from a lookup table.
 **Rendering.** `vo=gpu-next` requires `gpu-api=vulkan` via MoltenVK on macOS; libplacebo
 has no Metal backend and OpenGL is deprecated on Apple platforms. Known friction: crashes
 around colorspace/EDR metadata, and vsync jitter on high-refresh displays (120 Hz and
-above, i.e. any ProMotion panel). **HDR passthrough ships as an opt-in toggle, not a
-default.** Default to tone-mapping.
+above, i.e. any ProMotion panel). The original plan was to ship HDR passthrough as an
+opt-in toggle and default to tone-mapping. Measurement reversed that: neither fault
+appeared on Apple silicon, while tone-mapping flattened Dolby Vision to SDR on an XDR
+panel. **Passthrough is ON by default**, and IINA renders HDR when installed, because it
+owns the `CAMetalLayer` (see CLAUDE.md §"Open threads" and §"HDR passthrough is ON by
+default").
 
 ### 2.1 Capability detection
 
@@ -99,8 +103,9 @@ Three things vary by machine and display. Probe all three; store nothing chip-sp
 
 The decode probe is the important one. **Measure, don't predict.** Reading
 `hwdec-current` is ground truth on hardware that doesn't exist yet, which a chip table
-never will be. Cache results in `state/capabilities.json` keyed by
-`sysctl -n machdep.cpu.brand_string` so the probe runs once per codec per machine.
+never will be. The hardware probe (chip, GPU cores) is cached in
+`data/cache/capabilities.json`, keyed by `sysctl -n machdep.cpu.brand_string`. It is a
+cache and safe to delete. Nothing measured during playback is carried between sessions.
 
 **Library size.** REMUX titles run 50–80 GB. A few hundred titles is 20–40 TB, which will
 not be attached at once. **Most of the library is offline most of the time.** This is a
@@ -113,37 +118,29 @@ first-class UI state, not an error case.
 ```
 netflix-local/
 ├─ apps/
-│  ├─ desktop/              Electron main + preload
-│  │  ├─ src/main/          window management, IPC handlers, protocol
-│  │  ├─ src/preload/       contextBridge surface
-│  │  └─ electron.vite.config.ts
-│  └─ ui/                   React renderer
-│     ├─ src/routes/        Home, Detail, Player, Setup
-│     ├─ src/components/
-│     └─ src/lib/           typed IPC client, stores
+│  └─ desktop/              the Electron app
+│     ├─ src/main/          window, IPC handlers, media:// protocol, rows, playback
+│     ├─ src/preload/       contextBridge surface
+│     ├─ src/renderer/      React UI: picker, browse, detail, trailers
+│     └─ src/shared/        types that cross the IPC boundary
 ├─ packages/
-│  ├─ core/                 scanner, schema, volumes, metastore, index
-│  ├─ player/               PlaybackEngine interface + implementations
-│  └─ cli/                  scan, probe, enrich, add-title, validate, doctor
-├─ .claude/skills/
-│  └─ add-title/SKILL.md    agent instructions for metadata ingestion
-├─ db/
-│  ├─ movies/*.json         SOURCE OF TRUTH — agent-writable, git-tracked
-│  ├─ shows/*.json
-│  └─ index.sqlite          derived, disposable, gitignored
-├─ state/
-│  ├─ progress.json         resume positions, watched flags
-│  ├─ lists.json            My List, thumbs
-│  └─ volumes.json          paired library roots
-├─ cache/                   gitignored
-│  ├─ art/{id}/
-│  ├─ trailers/{id}.mp4
-│  └─ thumbs/{id}/
+│  ├─ core/                 scanner, schema, volumes, metastore, TMDB enrichment
+│  ├─ player/               PlaybackEngine: mpv and IINA, JSON IPC, quality tiers
+│  └─ cli/                  scan, play, enrich, library, volumes, doctor
+├─ data/                    gitignored; in a packaged app, Application Support/Nerdflix/data
+│  ├─ db/movies/*.json      title records — derived, rebuildable by rescanning
+│  ├─ db/shows/*.json
+│  ├─ state/                progress.json (watch history, My List, tracks), volumes.json
+│  └─ cache/                artwork, raw TMDB responses, capabilities — disposable
 └─ ARCHITECTURE.md
 ```
 
-**Invariant:** `db/` is hand- and agent-editable. `state/` is app-owned. `cache/` is
-regenerable. Deleting `index.sqlite` or `cache/` must never lose user data. Regenerating
+Not built, and still planned: a derived SQLite index (a few hundred titles resolve in
+memory instantly) and downloaded trailer and scrub-thumbnail caches. Trailers stream
+from YouTube instead.
+
+**Invariant:** `db/` is derived from the drives and TMDB. `state/` is app-owned.
+`cache/` is regenerable. Deleting `cache/` must never lose user data. Regenerating
 `db/` must never touch `state/`.
 
 ---
@@ -262,8 +259,8 @@ const MediaFile = z.object({
   sizeBytes: z.number(),
   durationSec: z.number(),
   // NOT stored. Decode capability is a property of the machine, not the file, and the
-  // same db/ may be read on a different Mac. Resolve at render time from
-  // state/capabilities.json — see §2.1.
+  // same db/ may be read on a different Mac. Measured at playback from hwdec-current
+  // — see §2.1.
 
   audio: z.array(z.object({
     codec: z.string(), channels: z.number(),

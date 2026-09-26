@@ -10,7 +10,7 @@ import { dirname, relative, sep } from 'node:path';
 import { discoverReleaseUnits, type DiscoveryIssue, type ReleaseUnit } from './discover.js';
 import { extractExternalIds, type ExternalIds } from './sidecar.js';
 import { parseRelease, type ParsedRelease } from './parse.js';
-import { probe, type ProbeResult } from './probe.js';
+import { FfprobeMissingError, probe, type ProbeResult } from './probe.js';
 import { computeContentId, fingerprint } from './content-id.js';
 
 export type ScannedTitle = {
@@ -89,6 +89,8 @@ export async function scanRoot(root: string, opts: ScanOptions = {}): Promise<Sc
           probeResult.durationSec,
         );
       } catch (err) {
+        // Not this file's fault: nothing can be read. Stop and say so.
+        if (err instanceof FfprobeMissingError) throw err;
         probeError = err instanceof Error ? err.message : String(err);
       }
     }

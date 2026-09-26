@@ -17,9 +17,8 @@
  *
  * THE ONE MANUAL STEP: `iina-cli` deliberately ignores `--input-*` options, so the IPC
  * socket cannot be passed per launch. It must be set once in IINA's own preferences —
- * Advanced → "Additional mpv options" — as:
- *
- *     input-ipc-server=/tmp/nerdflix-iina.sock
+ * Advanced → "Additional mpv options", which is a list of option/value pairs — as the
+ * option `input-ipc-server` with the value `/tmp/nerdflix-iina.sock`.
  *
  * This is the same thing SVP users do. Without it we can launch films but cannot track
  * progress, so the engine refuses to start rather than silently losing watch history.
@@ -128,9 +127,10 @@ export class IinaNotConfiguredError extends Error {
   constructor(socketPath: string) {
     super(
       `IINA is not exposing an IPC socket at ${socketPath}.\n\n` +
-        `Open IINA → Settings → Advanced, tick "Enable advanced settings", and add to\n` +
-        `"Additional mpv options":\n\n` +
-        `    input-ipc-server=${socketPath}\n\n` +
+        `Open IINA → Settings → Advanced, tick "Enable advanced settings", and under\n` +
+        `"Additional mpv options" press + and add:\n\n` +
+        `    option  input-ipc-server\n` +
+        `    value   ${socketPath}\n\n` +
         `Then quit IINA completely and try again. Without this, films would play but\n` +
         `watch progress could not be tracked.`,
     );
