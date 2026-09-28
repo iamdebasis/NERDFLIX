@@ -916,21 +916,30 @@ this app cannot do.
 
 Reported on a 27" 2560×1440 monitor: the detail view took 35% of the width where
 Netflix's takes about half, and everything else was laptop-sized in a sea of black. The
-UI was designed on a 14" MacBook Pro, and nothing grew beyond it.
+UI is built and tested on the user's 16" MacBook Pro (1728 points wide), and nothing grew
+beyond it.
 
 `main/ui-scale.ts` sets Chromium's zoom from the window's content size. That is
-`min(width / 1512, height / 945)`, never below 1, rounded to 0.05, capped at 3. Content
-sizes and the scale they get:
+`min(width / 1728, height / 960)`, never below 1, rounded to 0.05, capped at 3. Width
+sets the scale. Height only stops it at the point where fewer than 960 points of page
+would remain. Content sizes and the scale they get:
 
 | window | size | scale |
 |---|---|---|
-| the laptop, maximised | 1512×945 | 1.0 (untouched) |
-| 16" laptop | 1728×1080 | 1.15 |
-| 27" monitor, maximised | 2560×1415 | 1.5 |
+| the 16" laptop, maximised (Dock hidden) | 1728×1084 | 1.0 (untouched) |
+| a 14" laptop | 1512×945 | 1.0 (never shrunk) |
+| 27" monitor, maximised | 2560×1415 | 1.45 |
+| 27" monitor, full screen | 2560×1440 | 1.5 |
 | 4K TV at "looks like 1080p" | 1920×1055 | 1.1 |
-| 4K TV at native | 3840×2135 | 2.25 |
+| 4K TV at native | 3840×2135 | 2.2 |
 
-Measured at 2560×1415: the detail view went from 35% to 53% of the width.
+At 2560×1415 the detail view went from 35% of the width to about half, which matches the
+laptop's own 52%.
+
+The first version took a 14" MacBook Pro (1512×945) as the reference. On the real 16"
+laptop, a maximised window would therefore have grown 15% with nobody asking. It was
+caught by launching the BUILT app before it shipped: its window opened at 1469×921, 85%
+of a 1728×1084 work area. Measure the machine in question; do not assume it.
 
 **Why zoom, and not a root font size.** About 30% of the stylesheet is `px`, and the
 renderer computes geometry in JS: hover-card placement, the trailer frame's cover-and-

@@ -4,34 +4,34 @@ import assert from 'node:assert/strict';
 import { scaleOverride, trafficLightsFor, uiScaleFor } from './ui-scale.js';
 
 describe('the interface grows with the window', () => {
-  test('the laptop it was designed on is untouched', () => {
-    assert.equal(uiScaleFor(1512, 945), 1); // 14" MacBook Pro, maximised
-    assert.equal(uiScaleFor(1512, 982), 1); // …and full screen
-    assert.equal(uiScaleFor(1280, 820), 1); // the default window
+  test('the 16" laptop it is built and tested on is untouched, in every window', () => {
+    assert.equal(uiScaleFor(1728, 1084), 1); // maximised, Dock hidden (measured)
+    assert.equal(uiScaleFor(1728, 1117), 1); // full screen
+    assert.equal(uiScaleFor(1469, 921), 1); // the window it opens at (measured)
     assert.equal(uiScaleFor(900, 600), 1); // the minimum window: never smaller than drawn
   });
 
-  test('a 27" 2560×1440 monitor draws it half as large again (the report)', () => {
-    assert.equal(uiScaleFor(2560, 1415), 1.5); // maximised, below the menu bar
-    assert.equal(uiScaleFor(2560, 1440), 1.5); // full screen
+  test('a smaller laptop is never shrunk', () => {
+    assert.equal(uiScaleFor(1512, 945), 1); // 14" MacBook Pro
   });
 
-  test('a bigger laptop grows a little', () => {
-    assert.equal(uiScaleFor(1728, 1080), 1.15); // 16" MacBook Pro
+  test('a 27" 2560×1440 monitor draws it about half as large again (the report)', () => {
+    assert.equal(uiScaleFor(2560, 1415), 1.45); // maximised, below the menu bar
+    assert.equal(uiScaleFor(2560, 1440), 1.5); // full screen
   });
 
   test('TVs: 4K at "looks like 1080p", and 4K at native resolution', () => {
     assert.equal(uiScaleFor(1920, 1055), 1.1);
-    assert.equal(uiScaleFor(3840, 2135), 2.25);
+    assert.equal(uiScaleFor(3840, 2135), 2.2);
   });
 
   test('an ultrawide is held by its height, not stretched by its width', () => {
-    assert.equal(uiScaleFor(3440, 1415), 1.5);
+    assert.equal(uiScaleFor(3440, 1415), 1.45);
   });
 
   test('capped, and stepped so a resize does not re-lay out on every pixel', () => {
     assert.equal(uiScaleFor(7680, 4320), 3);
-    assert.equal(uiScaleFor(2100, 1350), uiScaleFor(2110, 1355)); // both 1.4
+    assert.equal(uiScaleFor(2100, 1350), uiScaleFor(2110, 1355)); // both 1.2
   });
 });
 
