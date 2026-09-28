@@ -101,7 +101,7 @@ guess.
   Jerry shorts) are described episode by episode. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 525 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 534 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -911,6 +911,54 @@ Not handled, and a judgement call rather than an oversight: hovering a tile WHIL
 is playing will start a trailer. The renderer has no signal for "a film is playing" —
 adding one means a new IPC channel — and Netflix sidesteps it by navigating away, which
 this app cannot do.
+
+## Big screens: the whole page scales with the window
+
+Reported on a 27" 2560×1440 monitor: the detail view took 35% of the width where
+Netflix's takes about half, and everything else was laptop-sized in a sea of black. The
+UI was designed on a 14" MacBook Pro, and nothing grew beyond it.
+
+`main/ui-scale.ts` sets Chromium's zoom from the window's content size. That is
+`min(width / 1512, height / 945)`, never below 1, rounded to 0.05, capped at 3. Content
+sizes and the scale they get:
+
+| window | size | scale |
+|---|---|---|
+| the laptop, maximised | 1512×945 | 1.0 (untouched) |
+| 16" laptop | 1728×1080 | 1.15 |
+| 27" monitor, maximised | 2560×1415 | 1.5 |
+| 4K TV at "looks like 1080p" | 1920×1055 | 1.1 |
+| 4K TV at native | 3840×2135 | 2.25 |
+
+Measured at 2560×1415: the detail view went from 35% to 53% of the width.
+
+**Why zoom, and not a root font size.** About 30% of the stylesheet is `px`, and the
+renderer computes geometry in JS: hover-card placement, the trailer frame's cover-and-
+crop, the pager. A font-size change scales only `rem` and leaves those behind. Zoom is one
+knob for all of them. Verified at 1.5: the trailer player's box equals the hover art box
+exactly, real pointer clicks work on every control in the `.nav` drag region, and the
+pager lands a tile on the row padding. Text is re-rasterised at the new size, not
+stretched.
+
+Three details:
+- **The height ratio counts too**, so an ultrawide or a short window cannot scale past
+  what fits.
+- **The traffic lights are native and do not zoom.** `setWindowButtonPosition` keeps their
+  CENTRE where the design puts it, scaled. The nav's left padding is
+  `calc(44px + 52px / var(--ui-scale))`, so only the gap after the 52pt cluster grows.
+  `--ui-scale` reaches CSS from `applyUiScale`.
+- **The window opens at 85% of the screen** (never below 1280×820), with the zoom set in
+  `webPreferences`, so the first frame is already at the right size.
+
+`NFL_UI_SCALE=1.5` forces a scale. To see a big screen without one:
+`NFL_UI_SCALE=1.5 pnpm app:debug`, then CDP `Emulation.setDeviceMetricsOverride` at
+2560×1415 (`cdp.command`).
+
+**Rows snap to their padding** (`scroll-padding-inline` on `.row-scroller`). Without it,
+the first tile's snap point was 3.5rem in, and Chrome re-snaps a row after any layout
+change. Some rows therefore opened scrolled, with the first poster flush to the window
+edge, out of line with the row title: one row at 1×, two at 1.5×. A zoom is a layout
+change, which is how it surfaced.
 
 ## Navigation
 

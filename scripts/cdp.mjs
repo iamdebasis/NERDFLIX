@@ -92,6 +92,9 @@ export async function attach(port = 9222) {
   await new Promise((r) => setTimeout(r, 300));
 
   return {
+    /** Any DevTools Protocol command, for what the helpers below do not cover. */
+    command: (method, params = {}) => send(method, params),
+
     /** Run an expression in the page and return its value. Throws what the page threw. */
     async eval(expression) {
       const msg = await send('Runtime.evaluate', {

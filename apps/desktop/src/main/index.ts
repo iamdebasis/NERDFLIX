@@ -3,7 +3,7 @@ import './data-dir.js';
 // Before anything runs ffprobe or mpv: Finder's PATH has no Homebrew. See tool-path.ts.
 import './tool-path.js';
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
 import { watch } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -30,6 +30,7 @@ import { ALL_LIBRARIES, type LibraryCard, type ScanResult } from '../shared/type
 import { buildBrowseData, registerMediaProtocol, registerMediaScheme } from './browse.js';
 import { disposePlayback, registerPlaybackIpc } from './library-ipc.js';
 import { scanQueue } from './scan-queue.js';
+import { scaleOverride, trafficLightsFor, uiScaleFor } from './ui-scale.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // out/main → repo root
@@ -366,10 +367,41 @@ function registerIpc(): void {
   });
 }
 
+/**
+ * Draw the interface at the size the window calls for. See ui-scale.ts.
+ *
+ * The scale also reaches CSS as `--ui-scale`, for the one thing that must NOT grow
+ * with the page: the room kept for the native traffic lights.
+ */
+function applyUiScale(win: BrowserWindow): void {
+  const { width, height } = win.getContentBounds();
+  const scale = scaleOverride(process.env.NFL_UI_SCALE) ?? uiScaleFor(width, height);
+  if (Math.abs(win.webContents.getZoomFactor() - scale) > 0.001) win.webContents.setZoomFactor(scale);
+  if (process.platform === 'darwin') win.setWindowButtonPosition(trafficLightsFor(scale));
+  void win.webContents
+    .executeJavaScript(`document.documentElement.style.setProperty('--ui-scale', '${scale}')`)
+    .catch(() => {});
+}
+
+/**
+ * Open in proportion to the screen, not at a fixed laptop size.
+ *
+ * 1280×820 on a 27" monitor was a small window in the middle of it, drawn at 1×. 85% of
+ * the work area, never less than the old size, and never more than the screen.
+ */
+function initialWindowSize(): { width: number; height: number } {
+  const area = screen.getPrimaryDisplay().workAreaSize;
+  return {
+    width: Math.min(area.width, Math.max(1280, Math.round(area.width * 0.85))),
+    height: Math.min(area.height, Math.max(820, Math.round(area.height * 0.85))),
+  };
+}
+
 function createWindow(): void {
+  const size = initialWindowSize();
+  const scale = scaleOverride(process.env.NFL_UI_SCALE) ?? uiScaleFor(size.width, size.height);
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    ...size,
     minWidth: 900,
     minHeight: 600,
     show: false,
@@ -377,14 +409,22 @@ function createWindow(): void {
     // Frameless with an inset traffic-light cluster: the picker is a full-bleed
     // canvas, and a standard title bar would cut the composition in half.
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 20, y: 20 },
+    trafficLightPosition: trafficLightsFor(scale),
     webPreferences: {
       preload: join(here, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // The first frame at the right size, rather than a jump from 1× after load.
+      zoomFactor: scale,
     },
   });
+
+  // Every way the window changes size — dragging an edge, maximising, full screen,
+  // moving to a larger display — arrives as a resize. A reload resets the CSS variable.
+  const win = mainWindow;
+  win.on('resize', () => applyUiScale(win));
+  win.webContents.on('did-finish-load', () => applyUiScale(win));
 
   // Paint only once there is something to show, so launch is a cut, not a flash.
   mainWindow.once('ready-to-show', () => mainWindow?.show());

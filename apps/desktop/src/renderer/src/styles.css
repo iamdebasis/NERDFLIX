@@ -389,7 +389,11 @@ body {
   display: flex;
   align-items: center;
   gap: 2rem;
-  padding: 1rem 3rem 1rem 6rem; /* room for the traffic lights */
+  /* Room for the traffic lights: 6rem as designed. They are native and do not zoom
+     with the page (see main/ui-scale.ts), so at a larger --ui-scale only the GAP after
+     them grows. The cluster's own 52pt stays 52pt, keeping the wordmark where the
+     design puts it relative to them. */
+  padding: 1rem 3rem 1rem calc(44px + 52px / var(--ui-scale, 1));
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent);
   transition: background 300ms ease;
   -webkit-app-region: drag;
@@ -900,6 +904,11 @@ body {
   overflow-x: auto;
   scroll-snap-type: x proximity;
   padding: 0 3.5rem 1rem;
+  /* Snap tiles to the padding, not the edge. Without it the first tile's snap point is
+     3.5rem in, and Chrome re-snaps a row after a layout change (a zoom, images arriving),
+     so some rows opened scrolled with their first poster flush to the window edge and
+     out of line with the row title. Measured: one row at 1×, two at 1.5×. */
+  scroll-padding-inline: 3.5rem;
   scrollbar-width: none;
 }
 
