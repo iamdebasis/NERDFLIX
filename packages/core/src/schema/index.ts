@@ -216,6 +216,12 @@ export const TitleSchema = z.object({
    */
   derivedVersion: z.number().int().default(0),
 
+  /**
+   * Which artwork rules downloaded the pictures. An older stamp re-downloads only what
+   * changed since, from the cached response: no search, no re-match. See ARTWORK_VERSION.
+   */
+  artworkVersion: z.number().int().default(1),
+
   externalIds: ExternalIdsSchema.default({}),
 
   trailer: z

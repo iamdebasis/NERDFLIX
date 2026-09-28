@@ -10,7 +10,7 @@
  */
 
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { Title } from '../schema/index.js';
 import type { MetaStore } from '../store/meta-store.js';
 import { decide, scoreCandidate, type MatchScore } from './match.js';
@@ -40,6 +40,51 @@ import type { EpisodeInfo, SeasonInfo } from '../schema/index.js';
  *    title may have gone out as decomposed Unicode, which TMDB cannot read.
  */
 export const DERIVE_VERSION = 2;
+
+/**
+ * Which artwork rules a title's pictures were downloaded under. Bump when a size
+ * changes. Titles with an older stamp re-fetch the changed picture from the cached
+ * response on the next enrichment pass, with no search and no re-match.
+ *
+ * 2 — backdrops at TMDB's ORIGINAL size (1920 or 3840 wide), not w1280. The billboard is
+ *     the full width of the window: a 1280-wide picture was stretched 2× across a 27"
+ *     2560 monitor and 2.4× across a Retina laptop, and looked it. Posters (w500) and
+ *     logos (w500, rasterised by TMDB — an original logo can be an SVG, which would be
+ *     saved as `logo.png`) are drawn small enough to stay as they are.
+ */
+export const ARTWORK_VERSION = 2;
+const BACKDROP_SIZE = 'original';
+
+/** A backdrop downloaded under older rules, which the current ones would fetch larger. */
+function artworkStale(title: Title): boolean {
+  return title.artworkVersion < ARTWORK_VERSION && Boolean(title.artwork.backdrop);
+}
+
+/**
+ * Fetch the backdrop again under the current rules. A failed download keeps the old
+ * picture AND the old stamp, so the next pass tries again rather than leaving a title
+ * with no backdrop. `backdropPath` null means TMDB has none: nothing to upgrade.
+ *
+ * Written OVER the old file, in its own folder. Browse serves all of a title's pictures
+ * from one folder, the poster's, and titles live in more than one layout (the app's
+ * `cache/artwork/art/<id>`, older `cache/<id>`). A new backdrop written to a different
+ * folder was never served: the app kept showing the 1280-wide one, measured. Only a
+ * path shaped `…/<title id>/backdrop.jpg` is reused, so an edited record cannot aim the
+ * download at another file.
+ */
+async function upgradeBackdrop(
+  title: Title,
+  backdropPath: string | null | undefined,
+  localCacheDir: string,
+): Promise<Title> {
+  if (!backdropPath) return { ...title, artworkVersion: ARTWORK_VERSION };
+  const existing = title.artwork.backdrop;
+  const inPlace =
+    existing && basename(existing) === 'backdrop.jpg' && basename(dirname(existing)) === title.id;
+  const target = inPlace ? existing : join(artworkDir(title.id, localCacheDir), 'backdrop.jpg');
+  if (!(await download(imageUrl(backdropPath, BACKDROP_SIZE), target))) return title;
+  return { ...title, artwork: { ...title.artwork, backdrop: target }, artworkVersion: ARTWORK_VERSION };
+}
 
 export type EnrichOutcome = {
   titleId: string;
@@ -79,6 +124,10 @@ export function needsEnrichment(
   // A show described from films has no series synopsis to fetch — TMDB has none.
   if (!title.overview && !title.episodesAsFilms) return true;
   if (opts.withArtwork && !title.artwork.poster) return true;
+  // Pictures downloaded under older, smaller rules. Cached response, no search.
+  if (opts.withArtwork && artworkStale(title) && (Boolean(title.externalIds.tmdbId) || title.episodesAsFilms)) {
+    return true;
+  }
   // A show is never finished: a new season or episode arriving on disk needs its names
   // and stills, even though the show itself matched long ago.
   if (title.type === 'show' && showHasUndescribedEpisodes(title)) return true;
@@ -511,11 +560,13 @@ async function enrichShorts(
           artwork.poster = join(dir, 'poster.jpg');
         }
       }
-      if (!artwork.backdrop) {
+      if (!artwork.backdrop || artworkStale(title)) {
         const backdrop = films.map((f) => pickImage(f.images?.backdrops, 'backdrop')).find(Boolean);
-        if (backdrop && (await download(imageUrl(backdrop, 'w1280'), join(dir, 'backdrop.jpg')))) {
-          artwork.backdrop = join(dir, 'backdrop.jpg');
-        }
+        const fresh = await upgradeBackdrop({ ...updated, artwork }, backdrop, localCacheDir);
+        Object.assign(artwork, fresh.artwork);
+        updated = { ...updated, artworkVersion: fresh.artworkVersion };
+      } else {
+        updated = { ...updated, artworkVersion: ARTWORK_VERSION };
       }
 
       // Each episode's still is its film's backdrop — landscape, like a TV still.
@@ -573,7 +624,11 @@ async function enrichShow(
   // Described from films before: stay that way. Searching TV again would only find the
   // series the year guard already ruled out. `force` re-asks TV, in case TMDB added one.
   if (title.episodesAsFilms && !opts.force) {
-    if (!showHasUndescribedEpisodes(title) && title.derivedVersion >= DERIVE_VERSION) {
+    if (
+      !showHasUndescribedEpisodes(title) &&
+      title.derivedVersion >= DERIVE_VERSION &&
+      (opts.skipArtwork || !artworkStale(title))
+    ) {
       return { titleId: title.id, status: 'skipped' };
     }
     return enrichShorts(title, client, store, localCacheDir, opts);
@@ -586,7 +641,7 @@ async function enrichShow(
     title.matchState === 'confirmed' || (title.matchState === 'auto' && Boolean(title.overview));
 
   if (settled && !opts.force && !showHasUndescribedEpisodes(title) &&
-      title.derivedVersion >= DERIVE_VERSION) {
+      title.derivedVersion >= DERIVE_VERSION && (opts.skipArtwork || !artworkStale(title))) {
     return { titleId: title.id, status: 'skipped' };
   }
 
@@ -672,11 +727,13 @@ async function enrichShow(
           artwork.poster = join(dir, 'poster.jpg');
         }
       }
-      if (!artwork.backdrop) {
+      if (!artwork.backdrop || (!matchNow && artworkStale(title))) {
         const backdrop = pickImage(show.images?.backdrops, 'backdrop');
-        if (backdrop && (await download(imageUrl(backdrop, 'w1280'), join(dir, 'backdrop.jpg')))) {
-          artwork.backdrop = join(dir, 'backdrop.jpg');
-        }
+        const fresh = await upgradeBackdrop({ ...updated, artwork }, backdrop, localCacheDir);
+        Object.assign(artwork, fresh.artwork);
+        updated = { ...updated, artworkVersion: fresh.artworkVersion };
+      } else {
+        updated = { ...updated, artworkVersion: ARTWORK_VERSION };
       }
       if (!artwork.logo) {
         const logo = pickImage(show.images?.logos, 'logo');
@@ -760,10 +817,27 @@ export async function enrichTitle(
   if (settled && !opts.force) {
     // Settled, but possibly derived under older rules. Re-deriving reads the cached
     // response — no search, so the title cannot silently match differently later.
+    let outcome: EnrichOutcome = { titleId: title.id, status: 'skipped' };
     if (title.derivedVersion < DERIVE_VERSION && title.externalIds.tmdbId) {
-      return rederiveTitle(title, client, store, country);
+      outcome = await rederiveTitle(title, client, store, country);
+      if (outcome.status === 'failed') return outcome;
     }
-    return { titleId: title.id, status: 'skipped' };
+    // Pictures from older, smaller rules: the backdrop again, from the same cached
+    // response. Poster, logo and match are untouched.
+    if (!opts.skipArtwork && artworkStale(title) && title.externalIds.tmdbId) {
+      try {
+        const current = (await store.get(title.id)) ?? title;
+        const movie = await client.movieDetails(title.externalIds.tmdbId);
+        const upgraded = await upgradeBackdrop(current, pickImage(movie.images?.backdrops, 'backdrop'), localCacheDir);
+        if (upgraded !== current) {
+          await store.save(upgraded);
+          if (outcome.status === 'skipped') outcome = { titleId: title.id, status: 'rederived' };
+        }
+      } catch (err) {
+        return { titleId: title.id, status: 'failed', error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    return outcome;
   }
 
   const fileSeconds = title.media[0]?.durationSec ?? 0;
@@ -829,13 +903,13 @@ export async function enrichTitle(
       if (poster && (await download(imageUrl(poster, 'w500'), join(dir, 'poster.jpg')))) {
         artwork.poster = join(dir, 'poster.jpg');
       }
-      if (backdrop && (await download(imageUrl(backdrop, 'w1280'), join(dir, 'backdrop.jpg')))) {
+      if (backdrop && (await download(imageUrl(backdrop, BACKDROP_SIZE), join(dir, 'backdrop.jpg')))) {
         artwork.backdrop = join(dir, 'backdrop.jpg');
       }
       if (logo && (await download(imageUrl(logo, 'w500'), join(dir, 'logo.png')))) {
         artwork.logo = join(dir, 'logo.png');
       }
-      updated = { ...updated, artwork };
+      updated = { ...updated, artwork, artworkVersion: ARTWORK_VERSION };
     }
 
     await store.save(updated);

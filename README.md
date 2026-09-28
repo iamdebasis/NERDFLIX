@@ -6,7 +6,7 @@
 
 Browse your library like a streaming service. Play it like an audiophile.
 
-`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `534 tests`
+`macOS 14+` · `Apple Silicon` · `Electron + React + TypeScript` · `mpv / IINA` · `542 tests`
 
 </div>
 
@@ -57,7 +57,8 @@ re-encoded, and nothing is ever written to your drives.**
   than what was requested.
 - **Fills a big screen.** On a 27" monitor or a TV the whole interface scales with the
   window, like Netflix, so the detail view, rows and text are the right size for the
-  room, not laptop-sized in the middle of it.
+  room, not laptop-sized in the middle of it. Backdrops are fetched at full size, so the
+  billboard stays sharp at 2560 wide and on a 4K TV.
 - **Catalogues drives you do not own** without writing a single byte to them. Unplug a
   drive and its films stay browsable; they just say where they are.
 
@@ -483,7 +484,7 @@ pnpm scan <path>          # scan a library root and print a report
 pnpm enrich               # TMDB metadata and artwork
 pnpm library [--review]   # list titles, availability, match warnings
 pnpm play <file>          # play with a terminal scrubber and live diagnostics
-pnpm test                 # 534 tests
+pnpm test                 # 542 tests
 pnpm typecheck
 ```
 
@@ -497,7 +498,7 @@ pnpm screenshots          # terminal 2 — writes docs/screenshots/
 
 ## Testing
 
-**534 tests**, run against real files and real behaviour rather than mocks — several
+**542 tests**, run against real files and real behaviour rather than mocks — several
 bugs here were only reproducible with genuine 4K HEVC and actual drive behaviour.
 
 The discovery tests build real directory trees in a temp dir and scan them, including

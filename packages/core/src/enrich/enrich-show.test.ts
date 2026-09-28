@@ -1,8 +1,13 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyShowDetails, needsEnrichment, showGenres } from './enrich.js';
-import type { TmdbSeason, TmdbShow } from './tmdb.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { applyShowDetails, ARTWORK_VERSION, DERIVE_VERSION, enrichTitle, needsEnrichment, showGenres } from './enrich.js';
+import type { TmdbClient, TmdbSeason, TmdbShow } from './tmdb.js';
+import { MetaStore } from '../store/meta-store.js';
 import type { MediaFile, Title } from '../schema/index.js';
 
 function ep(season: number, episode: number): MediaFile {
@@ -182,5 +187,68 @@ describe('a matched show still needs enrichment when new episodes arrive', () =>
   test('a new episode in a described season: needs it', () => {
     const grown = { ...matched, matchState: 'auto' as const, media: [...matched.media, ep(1, 3)] };
     assert.equal(needsEnrichment(grown), true);
+  });
+});
+
+describe('a matched series gets the full-size backdrop too', () => {
+  test('re-fetched at original size from the cached details: no search, poster and match untouched', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'nfl-show-art-'));
+    const realFetch = globalThis.fetch;
+    try {
+      const store = new MetaStore(join(dir, 'db'));
+      await store.init();
+      const described = show({
+        matchState: 'auto',
+        matchConfidence: 0.99,
+        overview: CHERNOBYL.overview!,
+        externalIds: { tmdbId: 87108 },
+        derivedVersion: DERIVE_VERSION,
+        artwork: { poster: '/old/poster.jpg', backdrop: '/old/backdrop.jpg' },
+        artworkVersion: 1,
+        seasonInfo: [{ season: 1, name: 'Miniseries', poster: '/old/season.jpg' }],
+        episodeInfo: [
+          { season: 1, episode: 1, name: '1:23:45', still: '/old/s1e1.jpg' },
+          { season: 1, episode: 2, name: 'Please Remain Calm', still: '/old/s1e2.jpg' },
+        ],
+      });
+      await store.save(described);
+      assert.equal(needsEnrichment(described, { withArtwork: true }), true);
+
+      let searches = 0;
+      const client = {
+        async searchTv() {
+          searches += 1;
+          throw new Error('a matched show is never searched again');
+        },
+        async tvDetails() {
+          return {
+            ...CHERNOBYL,
+            images: { backdrops: [{ file_path: '/chernobyl.jpg', iso_639_1: null, vote_average: 5, width: 3840, height: 2160 }], posters: [], logos: [] },
+          };
+        },
+        async tvSeason() {
+          return SEASON_1;
+        },
+      } as unknown as TmdbClient;
+      const fetched: string[] = [];
+      globalThis.fetch = (async (url: string | URL) => {
+        fetched.push(String(url));
+        return new Response(Buffer.from('jpeg'));
+      }) as typeof fetch;
+
+      await enrichTitle(described, client, store, join(dir, 'cache'), 'US');
+
+      assert.equal(searches, 0);
+      assert.deepEqual(fetched, ['https://image.tmdb.org/t/p/original/chernobyl.jpg']);
+      const saved = (await store.get(described.id))!;
+      assert.equal(saved.artworkVersion, ARTWORK_VERSION);
+      assert.notEqual(saved.artwork.backdrop, '/old/backdrop.jpg');
+      assert.equal(saved.artwork.poster, '/old/poster.jpg');
+      assert.equal(saved.matchState, 'auto');
+      assert.equal(needsEnrichment(saved, { withArtwork: true }), false);
+    } finally {
+      globalThis.fetch = realFetch;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

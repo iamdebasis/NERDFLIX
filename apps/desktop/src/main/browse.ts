@@ -61,8 +61,13 @@ export function registerMediaProtocol(): void {
   });
 }
 
-function artUrl(titleId: string, file: string, exists: boolean): string | null {
-  return exists ? `media://art/${titleId}/${file}` : null;
+/**
+ * `?v=` carries the artwork version. An upgraded picture is written over the same file
+ * name, and without a new URL the renderer kept showing the old one it had cached for the
+ * whole session. The handler reads only the path.
+ */
+function artUrl(titleId: string, file: string, exists: boolean, version: number): string | null {
+  return exists ? `media://art/${titleId}/${file}?v=${version}` : null;
 }
 
 function describeAudio(media: MediaFile | null | undefined): string | null {
@@ -136,9 +141,9 @@ export async function buildBrowseData(
       collection: t.collection,
       studio: t.studio,
       addedAt: t.addedAt,
-      poster: artUrl(t.id, 'poster.jpg', Boolean(t.artwork.poster)),
-      backdrop: artUrl(t.id, 'backdrop.jpg', Boolean(t.artwork.backdrop)),
-      logo: artUrl(t.id, 'logo.png', Boolean(t.artwork.logo)),
+      poster: artUrl(t.id, 'poster.jpg', Boolean(t.artwork.poster), t.artworkVersion),
+      backdrop: artUrl(t.id, 'backdrop.jpg', Boolean(t.artwork.backdrop), t.artworkVersion),
+      logo: artUrl(t.id, 'logo.png', Boolean(t.artwork.logo), t.artworkVersion),
       inMyList: myList.includes(t.id),
     };
 

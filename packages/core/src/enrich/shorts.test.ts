@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { pickByMakers, runtimeAgrees, seriesMakers, shortCandidates } from './shorts.js';
 import { couldHaveSeasons } from './match.js';
-import { applyShortsDetails, enrichTitle, needsEnrichment, DERIVE_VERSION } from './enrich.js';
+import { applyShortsDetails, enrichTitle, needsEnrichment, ARTWORK_VERSION, DERIVE_VERSION } from './enrich.js';
 import type { TmdbClient, TmdbMovie, TmdbShowCandidate } from './tmdb.js';
 import { MetaStore } from '../store/meta-store.js';
 import type { MediaFile, Title } from '../schema/index.js';
@@ -307,5 +307,45 @@ describe('a year-numbered show TMDB lists as films', () => {
       { season: 1940, episode: 1, film: FILMS[40372] },
     ]);
     assert.equal(after.matchState, 'confirmed');
+  });
+});
+
+describe('a series described from films gets the full-size backdrop too', () => {
+  test("its earliest film's backdrop is fetched again at original size — no search, poster untouched", async () => {
+    await withStore(async (store, dir) => {
+      const first = fakeTmdb();
+      await enrichTitle(tomAndJerry(), first.client, store, dir, 'US', { skipArtwork: true });
+      const matched = (await store.get('show-tom-and-jerry'))!;
+      // As an older build left it: a 1280-wide backdrop, stamped 1.
+      await store.save({ ...matched, artwork: { poster: '/old/poster.jpg', backdrop: '/old/backdrop.jpg' }, artworkVersion: 1 });
+
+      const again = fakeTmdb();
+      const details = again.client.movieDetails.bind(again.client);
+      (again.client as unknown as { movieDetails: (id: number) => Promise<TmdbMovie> }).movieDetails = async (id) => {
+        const f = await details(id);
+        return id === 40372
+          ? { ...f, images: { posters: [], backdrops: [{ file_path: '/puss.jpg', iso_639_1: null, vote_average: 5, width: 1920, height: 1080 }] } } as TmdbMovie
+          : f;
+      };
+      const realFetch = globalThis.fetch;
+      const fetched: string[] = [];
+      globalThis.fetch = (async (url: string | URL) => {
+        fetched.push(String(url));
+        return new Response(Buffer.from('jpeg'));
+      }) as typeof fetch;
+      try {
+        await enrichTitle((await store.get('show-tom-and-jerry'))!, again.client, store, dir, 'US');
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+
+      assert.equal(again.calls.searchMovie, 0, 'a described series is never searched again');
+      assert.ok(fetched.includes('https://image.tmdb.org/t/p/original/puss.jpg'), fetched.join('\n'));
+      const saved = (await store.get('show-tom-and-jerry'))!;
+      assert.equal(saved.artworkVersion, ARTWORK_VERSION);
+      assert.match(saved.artwork.backdrop ?? '', /backdrop\.jpg$/);
+      assert.notEqual(saved.artwork.backdrop, '/old/backdrop.jpg');
+      assert.equal(saved.artwork.poster, '/old/poster.jpg');
+    });
   });
 });

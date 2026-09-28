@@ -101,7 +101,7 @@ guess.
   Jerry shorts) are described episode by episode. See §"TV shows".
 - **No required terminal commands.** `pnpm install` then `pnpm app` is the whole surface.
 
-**Test suite:** 534 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
+**Test suite:** 542 tests. `pnpm test` covers `packages/*`, `apps/desktop/src/main` AND
 `apps/desktop/src/renderer/src`. The desktop tests were silently excluded for a long
 time — do not narrow that glob again.
 
@@ -953,6 +953,31 @@ Three details:
 `NFL_UI_SCALE=1.5` forces a scale. To see a big screen without one:
 `NFL_UI_SCALE=1.5 pnpm app:debug`, then CDP `Emulation.setDeviceMetricsOverride` at
 2560×1415 (`cdp.command`).
+
+**Backdrops are TMDB's original size** (`ARTWORK_VERSION` 2 in enrich.ts). The billboard
+is the full window width, and a w1280 backdrop was stretched 2× across a 2560 monitor
+(2.4× across a Retina laptop). Originals are 3840 or 1920 wide, about 30 MB for the
+library against 5.7 MB before. Posters and logos stay at w500. A logo's original can be an
+SVG, which would be saved as `logo.png`.
+
+`artworkVersion` on each title works the same way as `DERIVE_VERSION`. An older stamp
+re-downloads ONLY the backdrop, from the cached details: no search, no re-match, poster and
+match untouched. A failed download keeps the old picture and the old stamp, so the next
+pass retries. The next enrichment pass (after any scan, i.e. Rescan) does it. Two details
+each broke it:
+- **It must be written OVER the old file, in the same folder.** Browse serves all of a
+  title's pictures from one folder, the poster's. The first version wrote to the
+  canonical `artworkDir`, a different folder for existing titles, and the app went on
+  showing the 1280 file: 3840 on disk, 1280 on screen. Only a path shaped
+  `…/<title id>/backdrop.jpg` is reused, so an edited record cannot aim a download
+  elsewhere.
+- **The CLI's pre-filter never asked for artwork** (`needsEnrichment(t, { force })`), so
+  `pnpm run enrich` could not reach this upgrade, or a missing poster. It passes
+  `withArtwork` now, and uses the app's artwork folder (`cache/artwork`); it used to put
+  pictures in `cache/art/<id>`.
+
+Art URLs carry `?v=<artworkVersion>`. The file name does not change, and the renderer
+kept its cached copy for the session.
 
 **Rows snap to their padding** (`scroll-padding-inline` on `.row-scroller`). Without it,
 the first tile's snap point was 3.5rem in, and Chrome re-snaps a row after any layout

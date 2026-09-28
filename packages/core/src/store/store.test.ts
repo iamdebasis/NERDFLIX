@@ -49,6 +49,7 @@ function title(over: Partial<Title> = {}): Title {
     media: [media()],
     similarIds: [],
     derivedVersion: 0,
+    artworkVersion: 1,
     creators: [],
     seasonInfo: [],
     episodeInfo: [],

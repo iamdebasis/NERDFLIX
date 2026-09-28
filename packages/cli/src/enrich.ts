@@ -79,7 +79,10 @@ async function main() {
   const country = process.env.NFL_COUNTRY ?? 'IN';
 
   const todo = titles
-    .filter((t) => needsEnrichment(t, { force }))
+    // Artwork counts unless it was turned off: without it, a missing poster or a backdrop
+    // from older, smaller rules never reached enrichTitle from the CLI — the drift
+    // needsEnrichment exists to prevent.
+    .filter((t) => needsEnrichment(t, { force, withArtwork: !skipArtwork }))
     .slice(0, limit);
 
   if (todo.length === 0) {
@@ -93,7 +96,9 @@ async function main() {
   const outcomes: EnrichOutcome[] = [];
   for (const [i, title] of todo.entries()) {
     process.stderr.write(`${C.dim}[${i + 1}/${todo.length}] ${title.title}…${C.reset}\x1b[K\r`);
-    const outcome = await enrichTitle(title, client, store, CACHE_DIR, country, {
+    // The same artwork folder the app uses (cache/artwork). Passing the bare cache dir
+    // put CLI-fetched pictures in cache/art/<id>, a second layout for the same title.
+    const outcome = await enrichTitle(title, client, store, join(CACHE_DIR, 'artwork'), country, {
       force,
       skipArtwork,
     });
@@ -116,7 +121,7 @@ async function main() {
   console.log(`\n${C.bold}Done${C.reset}`);
   console.log(`  ${C.green}${count('matched')}${C.reset} matched`);
   if (count('refreshed')) console.log(`  ${C.green}${count('refreshed')}${C.reset} shows brought up to date ${C.dim}(new seasons or episodes)${C.reset}`);
-  if (count('rederived')) console.log(`  ${C.green}${count('rederived')}${C.reset} re-derived from cache ${C.dim}(no network)${C.reset}`);
+  if (count('rederived')) console.log(`  ${C.green}${count('rederived')}${C.reset} re-derived from cache ${C.dim}(no search, no re-match; pictures may be re-downloaded)${C.reset}`);
   if (count('review')) console.log(`  ${C.yellow}${count('review')}${C.reset} need review — ${C.dim}pnpm library --review${C.reset}`);
   if (count('not-found')) console.log(`  ${C.red}${count('not-found')}${C.reset} not found on TMDB`);
   if (count('failed')) console.log(`  ${C.red}${count('failed')}${C.reset} failed`);
